@@ -65,7 +65,7 @@ export class CanvasRenderer {
 
     for (let r = 0; r < height; r++) {
       for (let c = 0; c < width; c++) {
-        const s = palette[tiles[r * width + c]];
+        const s = palette[tiles[r * width + c].surface];
         const x = c * tileSize;
         const y = r * tileSize;
         g.fillStyle = s.color;
@@ -79,10 +79,36 @@ export class CanvasRenderer {
     g.lineWidth = 1;
     for (let r = 0; r < height; r++)
       for (let c = 0; c < width; c++)
-        if (!palette[tiles[r * width + c]].solid)
+        if (!palette[tiles[r * width + c].surface].solid)
           g.strokeRect(c * tileSize + 0.5, r * tileSize + 0.5, tileSize - 1, tileSize - 1);
 
+    // obstacles posés par-dessus le sol (dessinés en dernier).
+    for (let r = 0; r < height; r++)
+      for (let c = 0; c < width; c++) {
+        const obstacle = tiles[r * width + c].obstacle;
+        if (obstacle) this.drawObstacle(g, obstacle, c * tileSize, r * tileSize);
+      }
+
     this.cache = cache;
+  }
+
+  // Rendu d'un obstacle posé sur une tuile. Ajouter un type = une branche ici.
+  private drawObstacle(g: CanvasRenderingContext2D, id: string, x: number, y: number): void {
+    const TILE = this.track.tileSize;
+    if (id === 'TREE') {
+      g.fillStyle = 'rgba(0,0,0,0.3)';
+      g.beginPath();
+      g.ellipse(x + TILE / 2, y + TILE * 0.62, TILE * 0.4, TILE * 0.18, 0, 0, TAU);
+      g.fill();
+      g.fillStyle = '#2c5a30';
+      g.beginPath();
+      g.arc(x + TILE / 2, y + TILE / 2, TILE * 0.42, 0, TAU);
+      g.fill();
+      g.fillStyle = '#173318';
+      g.beginPath();
+      g.arc(x + TILE / 2, y + TILE / 2, TILE * 0.22, 0, TAU);
+      g.fill();
+    }
   }
 
   private addTexture(
@@ -119,15 +145,6 @@ export class CanvasRenderer {
     } else if (s.id === 'WALL') {
       g.fillStyle = 'rgba(255,255,255,0.02)';
       g.fillRect(x, y, TILE, 1);
-    } else if (s.id === 'TREE') {
-      g.fillStyle = '#2c5a30';
-      g.beginPath();
-      g.arc(x + TILE / 2, y + TILE / 2, TILE * 0.42, 0, 7);
-      g.fill();
-      g.fillStyle = '#173318';
-      g.beginPath();
-      g.arc(x + TILE / 2, y + TILE / 2, TILE * 0.22, 0, 7);
-      g.fill();
     }
     g.restore();
   }
