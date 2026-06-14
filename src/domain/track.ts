@@ -20,9 +20,14 @@ export interface Tile {
   readonly obstacle?: ObstacleId;
 }
 
+// 'loop' = circuit à boucler (tours/laps) ; 'stage' = spéciale point-à-point A→B
+// (franchir l'arrivée une fois = étape terminée), à la mode rallye.
+export type TrackKind = 'loop' | 'stage';
+
 export interface Track {
   readonly id: string;
   readonly name: string;
+  readonly kind: TrackKind;
   readonly width: number; // en tuiles
   readonly height: number; // en tuiles
   readonly tileSize: number; // px par tuile
