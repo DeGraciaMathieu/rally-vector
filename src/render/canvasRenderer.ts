@@ -9,14 +9,18 @@ import { step } from '../domain/physics';
 import { Surface } from '../domain/surfaces';
 import { Track, isSolid, surfaceAt, trackHeightPx, trackWidthPx } from '../domain/track';
 import { Vec2 } from '../domain/vec2';
-import { AnimView } from '../systems/simulation';
+import { AnimView, animPos } from '../systems/simulation';
+import { Camera } from '../systems/camera';
 
 const TAU = Math.PI * 2;
 
 export class CanvasRenderer {
   private readonly ctx: CanvasRenderingContext2D;
-  private readonly W: number;
-  private readonly H: number;
+  private readonly dpr: number;
+  private readonly vw: number; // viewport (px logiques)
+  private readonly vh: number;
+  private readonly worldW: number; // monde (px)
+  private readonly worldH: number;
   private cache!: HTMLCanvasElement;
   private readonly css: Record<string, string> = {};
 
@@ -26,11 +30,15 @@ export class CanvasRenderer {
     private readonly tuning: Tuning,
   ) {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    this.W = trackWidthPx(track);
-    this.H = trackHeightPx(track);
-    canvas.width = this.W * dpr;
-    canvas.height = this.H * dpr;
-    canvas.style.aspectRatio = `${this.W} / ${this.H}`;
+    this.dpr = dpr;
+    const { width, height } = tuning.camera.viewport;
+    this.vw = width;
+    this.vh = height;
+    this.worldW = trackWidthPx(track);
+    this.worldH = trackHeightPx(track);
+    canvas.width = this.vw * dpr;
+    canvas.height = this.vh * dpr;
+    canvas.style.aspectRatio = `${this.vw} / ${this.vh}`;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas 2D indisponible');
     this.ctx = ctx;
@@ -49,8 +57,8 @@ export class CanvasRenderer {
   private buildCache(dpr: number): void {
     const { tileSize, width, height, tiles, palette } = this.track;
     const cache = document.createElement('canvas');
-    cache.width = this.W * dpr;
-    cache.height = this.H * dpr;
+    cache.width = this.worldW * dpr;
+    cache.height = this.worldH * dpr;
     const g = cache.getContext('2d');
     if (!g) throw new Error('Canvas 2D indisponible');
     g.scale(dpr, dpr);
@@ -140,21 +148,42 @@ export class CanvasRenderer {
   }
 
   // ------------------------------- frame -------------------------------
-  draw(now: number, state: RaceState, anim: AnimView | null, showAid: boolean): void {
+  draw(now: number, state: RaceState, anim: AnimView | null, showAid: boolean, camera: Camera): void {
     const ctx = this.ctx;
-    ctx.clearRect(0, 0, this.W, this.H);
-    ctx.drawImage(this.cache, 0, 0, this.W, this.H);
+    ctx.clearRect(0, 0, this.vw, this.vh);
+
+    // Transformée caméra : tout est ensuite dessiné en coordonnées MONDE.
+    ctx.save();
+    ctx.translate(this.vw / 2, this.vh / 2);
+    ctx.scale(camera.zoom, camera.zoom);
+    ctx.translate(-camera.x, -camera.y);
+
+    this.blitVisible(camera);
 
     if (state.phase === 'animating' && anim) {
-      const t = Math.min(1, (now - anim.t0) / anim.dur);
-      const e = 1 - Math.pow(1 - t, 2); // easing out
-      const x = anim.from.x + (anim.to.x - anim.from.x) * e;
-      const y = anim.from.y + (anim.to.y - anim.from.y) * e;
-      this.drawCar(x, y, anim.heading);
+      const p = animPos(anim, now);
+      this.drawCar(p.x, p.y, anim.heading);
     } else {
       if (state.phase === 'idle') this.drawAimAndGhost(state, showAid);
       this.drawCar(state.car.pos.x, state.car.pos.y, state.car.heading);
     }
+
+    ctx.restore();
+  }
+
+  // Culling : ne blitte que la portion visible du cache monde (clampée aux bornes).
+  private blitVisible(camera: Camera): void {
+    const halfW = this.vw / (2 * camera.zoom);
+    const halfH = this.vh / (2 * camera.zoom);
+    const x0 = Math.max(0, camera.x - halfW);
+    const y0 = Math.max(0, camera.y - halfH);
+    const x1 = Math.min(this.worldW, camera.x + halfW);
+    const y1 = Math.min(this.worldH, camera.y + halfH);
+    const w = x1 - x0;
+    const h = y1 - y0;
+    if (w <= 0 || h <= 0) return;
+    const d = this.dpr;
+    this.ctx.drawImage(this.cache, x0 * d, y0 * d, w * d, h * d, x0, y0, w, h);
   }
 
   private drawCar(x: number, y: number, ang: number): void {
