@@ -15,8 +15,9 @@ import {
   resolveMove,
   setImpulse,
 } from '../domain/gameState';
+import { ContactKind } from '../domain/collision';
 import { createRng } from '../domain/rng';
-import { Track, isSolid, surfaceAt } from '../domain/track';
+import { Track, contactAt, isSolid, surfaceAt } from '../domain/track';
 import { Vec2, length, sub } from '../domain/vec2';
 import { LapEvent, LapTracker } from './lap';
 
@@ -43,29 +44,52 @@ export function animPos(anim: AnimView, now: number): Vec2 {
 
 // Cœur déterministe d'un tour, sans animation ni comptage : setImpulse → résoudre
 // → appliquer. Utilisé par les tests de déterminisme du RaceState et réutilisable.
-export function advanceTurn(state: RaceState, track: Track, tuning: Tuning, impulse: Vec2): RaceState {
+// `strict` (défaut true) = mode crash = fin systématique (préserve P2).
+export function advanceTurn(
+  state: RaceState,
+  track: Track,
+  tuning: Tuning,
+  impulse: Vec2,
+  strict = true,
+): RaceState {
   const aimed = setImpulse(state, impulse);
   const surf = surfaceAt(track, aimed.car.pos.x, aimed.car.pos.y);
-  const move = resolveMove(aimed, surf, tuning, (x, y) => isSolid(track, x, y));
-  return applyMove(aimed, move);
+  const move = resolveMove(
+    aimed,
+    surf,
+    tuning,
+    (x, y) => isSolid(track, x, y),
+    (x, y) => contactAt(track, x, y),
+    strict,
+  );
+  return applyMove(aimed, move, tuning);
 }
 
 export interface TurnResult {
   readonly events: LapEvent[];
+  readonly contact: ContactKind | null; // conséquence appliquée ce tour (cosmétique)
 }
 
 export class Simulation {
   private _state: RaceState;
   private _anim: Anim | null = null;
+  private _strict: boolean;
   private readonly laps: LapTracker;
 
   constructor(
     private readonly track: Track,
     private readonly tuning: Tuning,
     private seed: number,
+    strict = true,
   ) {
     this._state = createRaceState(createRng(seed), track.start);
+    this._strict = strict;
     this.laps = new LapTracker(track);
+  }
+
+  // Mode strict : crash = fin systématique (préserve la version d'origine).
+  setStrict(strict: boolean): void {
+    this._strict = strict;
   }
 
   get state(): RaceState {
@@ -93,7 +117,14 @@ export class Simulation {
   commit(now: number): boolean {
     if (this._state.phase !== 'idle') return false;
     const surf = surfaceAt(this.track, this._state.car.pos.x, this._state.car.pos.y);
-    const move = resolveMove(this._state, surf, this.tuning, (x, y) => isSolid(this.track, x, y));
+    const move = resolveMove(
+      this._state,
+      surf,
+      this.tuning,
+      (x, y) => isSolid(this.track, x, y),
+      (x, y) => contactAt(this.track, x, y),
+      this._strict,
+    );
     const dist = length(sub(move.to, move.from));
     const { min, max, pxPerMs } = this.tuning.anim;
     const dur = Math.min(max, Math.max(min, dist / pxPerMs));
@@ -105,15 +136,16 @@ export class Simulation {
   // Avance le temps : finalise le tour quand l'animation est terminée.
   // Renvoie les événements de boucle (pour le chrono côté root).
   update(now: number): TurnResult {
-    if (this._state.phase !== 'animating' || !this._anim) return { events: [] };
-    if (now - this._anim.t0 < this._anim.dur) return { events: [] };
+    if (this._state.phase !== 'animating' || !this._anim) return { events: [], contact: null };
+    if (now - this._anim.t0 < this._anim.dur) return { events: [], contact: null };
 
     const move = this._anim.move;
     this._anim = null;
-    const applied = applyMove(this._state, move);
+    const contact = move.contact ? move.contact.kind : null;
+    const applied = applyMove(this._state, move, this.tuning);
     if (applied.phase === 'crashed') {
       this._state = applied;
-      return { events: [] };
+      return { events: [], contact };
     }
 
     const events = this.laps.update(move.from, move.to);
@@ -122,6 +154,6 @@ export class Simulation {
       if (ev.type === 'lapComplete') next = completeLap(next);
     }
     this._state = next;
-    return { events };
+    return { events, contact };
   }
 }
