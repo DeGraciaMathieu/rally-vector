@@ -38,6 +38,7 @@ let sim = new Simulation(track, TUNING, SEED);
 let renderer = new CanvasRenderer(canvas, track, TUNING);
 
 let showAid = true;
+let strictCrash = true; // mode crash = fin systématique (préserve la version d'origine)
 
 // Caméra cosmétique (jamais dans l'état). Bornes dérivées de la taille du circuit.
 let bounds: Bounds = makeBounds();
@@ -74,8 +75,18 @@ const hud = {
   surfDot: el('hud-surf-dot'),
 };
 const banner = el('banner');
+const toast = el('toast');
 const aidBtn = el('btn-aid');
+const strictBtn = el('btn-strict');
 const trackBtn = el('btn-track');
+
+let toastTimer: number | undefined;
+function showToast(msg: string): void {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  if (toastTimer !== undefined) clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => toast.classList.remove('show'), 1100);
+}
 
 function updateHud(): void {
   const st = sim.state;
@@ -101,7 +112,7 @@ function reset(): void {
 function loadTrack(index: number): void {
   trackIndex = index;
   track = tracks[trackIndex];
-  sim = new Simulation(track, TUNING, SEED);
+  sim = new Simulation(track, TUNING, SEED, strictCrash);
   renderer = new CanvasRenderer(canvas, track, TUNING);
   bounds = makeBounds();
   trackBtn.firstChild!.textContent = `Circuit : ${track.name} `;
@@ -128,6 +139,13 @@ function toggleView(): void {
   circuitView = !circuitView;
 }
 
+function toggleStrict(): void {
+  strictCrash = !strictCrash;
+  sim.setStrict(strictCrash);
+  strictBtn.setAttribute('aria-pressed', String(strictCrash));
+  if (strictBtn.firstChild) strictBtn.firstChild.textContent = `Crash = fin : ${strictCrash ? 'ON' : 'OFF'} `;
+}
+
 function showBanner(): void {
   updateHud();
   banner.classList.add('show');
@@ -137,6 +155,7 @@ el('btn-go').addEventListener('click', commit);
 el('btn-restart').addEventListener('click', reset);
 el('banner-restart').addEventListener('click', reset);
 aidBtn.addEventListener('click', toggleAid);
+strictBtn.addEventListener('click', toggleStrict);
 trackBtn.addEventListener('click', () => loadTrack((trackIndex + 1) % tracks.length));
 
 bindInput(canvas, VIEWPORT, TUNING.maxImpulse, {
@@ -152,7 +171,7 @@ bindInput(canvas, VIEWPORT, TUNING.maxImpulse, {
 
 function frame(now: number): void {
   const before = sim.state.phase;
-  const { events } = sim.update(now);
+  const { events, contact } = sim.update(now);
 
   for (const ev of events) {
     if (ev.type === 'lapComplete') {
@@ -165,6 +184,8 @@ function frame(now: number): void {
   // Le tour vient de se terminer : rafraîchir le HUD (et le bandeau si crash).
   if (before === 'animating' && sim.state.phase !== 'animating') {
     if (sim.state.phase === 'crashed') showBanner();
+    else if (contact === 'spin') showToast('Tête-à-queue !');
+    else if (contact === 'graze') showToast('Frôlement');
     updateHud();
   }
 

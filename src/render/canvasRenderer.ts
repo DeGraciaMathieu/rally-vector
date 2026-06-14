@@ -108,6 +108,18 @@ export class CanvasRenderer {
       g.beginPath();
       g.arc(x + TILE / 2, y + TILE / 2, TILE * 0.22, 0, TAU);
       g.fill();
+    } else if (id === 'BALES') {
+      const s = TILE * 0.66;
+      const o = (TILE - s) / 2;
+      g.fillStyle = '#c9a23a';
+      g.fillRect(x + o, y + o, s, s);
+      g.strokeStyle = 'rgba(0,0,0,0.3)';
+      g.lineWidth = 1;
+      g.strokeRect(x + o + 0.5, y + o + 0.5, s - 1, s - 1);
+      g.beginPath();
+      g.moveTo(x + o, y + TILE / 2);
+      g.lineTo(x + o + s, y + TILE / 2);
+      g.stroke();
     }
   }
 
