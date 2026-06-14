@@ -35,11 +35,16 @@ interface Anim extends AnimView {
   readonly move: ResolvedMove;
 }
 
-// Position interpolée (easing out) de la voiture pendant un tour animé. Cosmétique :
-// lue par render/ (dessin) et par la caméra (suivi), jamais réinjectée dans l'état.
-export function animPos(anim: AnimView, now: number): Vec2 {
+// Progression interpolée (easing out) d'un tour animé, dans [0, 1]. Cosmétique.
+export function animEase(anim: AnimView, now: number): number {
   const t = Math.min(1, (now - anim.t0) / anim.dur);
-  const e = 1 - Math.pow(1 - t, 2);
+  return 1 - Math.pow(1 - t, 2);
+}
+
+// Position interpolée de la voiture pendant un tour animé. Cosmétique : lue par
+// render/ (dessin) et par la caméra (suivi), jamais réinjectée dans l'état.
+export function animPos(anim: AnimView, now: number): Vec2 {
+  const e = animEase(anim, now);
   return { x: anim.from.x + (anim.to.x - anim.from.x) * e, y: anim.from.y + (anim.to.y - anim.from.y) * e };
 }
 
