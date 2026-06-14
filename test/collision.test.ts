@@ -1,7 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { firstHit } from '../src/domain/collision';
+import type { Tile, Track } from '../src/domain/track';
 import { isSolid } from '../src/domain/track';
 import { track01 } from '../src/data/tracks/track-01';
+import { O } from '../src/data/obstacles';
+import { S } from '../src/data/surfaces';
+
+const TILE = 36;
+// Grille 3x3 ROAD avec un arbre solide au centre (1,1).
+const treeTrack: Track = {
+  id: 't',
+  name: 't',
+  width: 3,
+  height: 3,
+  tileSize: TILE,
+  tiles: Array.from({ length: 9 }, (_, i): Tile =>
+    i === 4 ? { surface: 'ROAD', obstacle: 'TREE' } : { surface: 'ROAD' },
+  ),
+  palette: S,
+  obstacles: O,
+  outOfBounds: 'WALL',
+  start: { pos: { x: 0, y: 0 }, heading: 0 },
+  finishLine: { a: { x: 0, y: 0 }, b: { x: 0, y: TILE } },
+  checkpoints: [],
+};
 
 describe('collision.firstHit', () => {
   it('détecte le premier point solide le long du segment', () => {
@@ -26,5 +48,15 @@ describe('collision.firstHit', () => {
     const start = track01.start.pos;
     const hit = firstHit(start.x, start.y, -50, start.y, solid);
     expect(hit).not.toBeNull();
+  });
+
+  it('déclenche firstHit sur un obstacle solide au milieu d’une tuile roulable', () => {
+    const solid = (x: number, y: number): boolean => isSolid(treeTrack, x, y);
+    const cy = 1.5 * TILE; // traverse la tuile centrale horizontalement
+    const hit = firstHit(0, cy, 3 * TILE, cy, solid);
+    expect(hit).not.toBeNull();
+    // touché autour du centre (54 px), pas au bord de tuile
+    expect(hit!.x).toBeGreaterThan(TILE);
+    expect(hit!.x).toBeLessThan(2 * TILE);
   });
 });
