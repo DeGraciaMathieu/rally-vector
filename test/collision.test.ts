@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { firstHit } from '../src/domain/collision';
+import { classifyContact, firstHit } from '../src/domain/collision';
 import type { Tile, Track } from '../src/domain/track';
 import { isSolid } from '../src/domain/track';
 import { track01 } from '../src/data/tracks/track-01';
@@ -58,5 +58,25 @@ describe('collision.firstHit', () => {
     // touché autour du centre (54 px), pas au bord de tuile
     expect(hit!.x).toBeGreaterThan(TILE);
     expect(hit!.x).toBeLessThan(2 * TILE);
+  });
+});
+
+describe('classifyContact', () => {
+  const TH = { fatalSpeed: 105, spinSpeed: 37.5 };
+
+  it('cible fatale = toujours fatal, quelle que soit la vitesse', () => {
+    expect(classifyContact('fatal', 10, TH, false)).toBe('fatal');
+    expect(classifyContact('fatal', 200, TH, false)).toBe('fatal');
+  });
+
+  it('mode strict = toujours fatal, même cible souple', () => {
+    expect(classifyContact('soft', 10, TH, true)).toBe('fatal');
+    expect(classifyContact('soft', 50, TH, true)).toBe('fatal');
+  });
+
+  it('cible souple : graduation par vitesse à l’impact', () => {
+    expect(classifyContact('soft', 120, TH, false)).toBe('fatal'); // >= fatalSpeed
+    expect(classifyContact('soft', 60, TH, false)).toBe('spin'); // [spin, fatal[
+    expect(classifyContact('soft', 20, TH, false)).toBe('graze'); // < spinSpeed
   });
 });
