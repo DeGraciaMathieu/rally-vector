@@ -33,6 +33,14 @@ interface Anim extends AnimView {
   readonly move: ResolvedMove;
 }
 
+// Position interpolée (easing out) de la voiture pendant un tour animé. Cosmétique :
+// lue par render/ (dessin) et par la caméra (suivi), jamais réinjectée dans l'état.
+export function animPos(anim: AnimView, now: number): Vec2 {
+  const t = Math.min(1, (now - anim.t0) / anim.dur);
+  const e = 1 - Math.pow(1 - t, 2);
+  return { x: anim.from.x + (anim.to.x - anim.from.x) * e, y: anim.from.y + (anim.to.y - anim.from.y) * e };
+}
+
 // Cœur déterministe d'un tour, sans animation ni comptage : setImpulse → résoudre
 // → appliquer. Utilisé par les tests de déterminisme du RaceState et réutilisable.
 export function advanceTurn(state: RaceState, track: Track, tuning: Tuning, impulse: Vec2): RaceState {

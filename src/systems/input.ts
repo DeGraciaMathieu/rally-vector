@@ -1,9 +1,10 @@
 // Entrées : pointeur (viser) et clavier. Convertit un point monde en impulsion
 // bornée et câble les événements DOM. Ne décide d'aucune règle de jeu : il appelle
-// des callbacks fournis par le root.
+// des callbacks fournis par le root. Sous caméra mobile, le point écran passe par
+// `screenToWorld` (fourni par le root) pour rester précis quelle que soit la vue.
 
-import { Track, trackHeightPx, trackWidthPx } from '../domain/track';
 import { Vec2, clampLength, sub } from '../domain/vec2';
+import { Viewport } from './camera';
 
 // Impulsion = (point visé − position voiture), bornée à maxImpulse. Pure.
 export const aimToImpulse = (carPos: Vec2, point: Vec2, maxImpulse: number): Vec2 =>
@@ -12,27 +13,28 @@ export const aimToImpulse = (carPos: Vec2, point: Vec2, maxImpulse: number): Vec
 export interface InputCallbacks {
   getCarPos: () => Vec2;
   canAim: () => boolean; // vrai seulement à l'arrêt
+  screenToWorld: (screen: Vec2) => Vec2; // mappe le point écran (viewport) en monde
   onAim: (impulse: Vec2) => void;
   onCommit: () => void;
   onReset: () => void;
   onToggleAid: () => void;
+  onToggleView: () => void;
 }
 
 export function bindInput(
   canvas: HTMLCanvasElement,
-  track: Track,
+  viewport: Viewport,
   maxImpulse: number,
   cb: InputCallbacks,
 ): void {
-  const W = trackWidthPx(track);
-  const H = trackHeightPx(track);
-
+  // Point client -> coordonnées viewport (px logiques) -> monde (via caméra).
   const toWorld = (ev: PointerEvent): Vec2 => {
     const r = canvas.getBoundingClientRect();
-    return {
-      x: ((ev.clientX - r.left) / r.width) * W,
-      y: ((ev.clientY - r.top) / r.height) * H,
+    const screen = {
+      x: ((ev.clientX - r.left) / r.width) * viewport.width,
+      y: ((ev.clientY - r.top) / r.height) * viewport.height,
     };
+    return cb.screenToWorld(screen);
   };
   const aim = (ev: PointerEvent): void =>
     cb.onAim(aimToImpulse(cb.getCarPos(), toWorld(ev), maxImpulse));
@@ -62,6 +64,8 @@ export function bindInput(
       cb.onReset();
     } else if (e.key === 'a' || e.key === 'A') {
       cb.onToggleAid();
+    } else if (e.key === 'c' || e.key === 'C') {
+      cb.onToggleView();
     }
   });
 }
