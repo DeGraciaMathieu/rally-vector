@@ -58,6 +58,7 @@ const start = { c: 4, r: 1 };
 export const track02: Track = {
   id: 'track-02',
   name: 'Spéciale technique',
+  kind: 'loop',
   width: WIDTH,
   height: HEIGHT,
   tileSize: TILE,

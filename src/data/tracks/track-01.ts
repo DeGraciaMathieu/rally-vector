@@ -49,6 +49,7 @@ const start = { c: 6, r: 2 };
 export const track01: Track = {
   id: 'track-01',
   name: 'Spéciale historique',
+  kind: 'loop',
   width: WIDTH,
   height: HEIGHT,
   tileSize: TILE,
