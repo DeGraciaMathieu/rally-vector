@@ -21,6 +21,7 @@ function corridor(): Track {
   return {
     id: 't',
     name: 't',
+    kind: 'loop',
     width: 10,
     height: 1,
     tileSize: TILE,

@@ -11,6 +11,7 @@ const TILE = 36;
 const treeTrack: Track = {
   id: 't',
   name: 't',
+  kind: 'loop',
   width: 3,
   height: 3,
   tileSize: TILE,

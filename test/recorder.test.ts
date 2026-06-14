@@ -35,7 +35,7 @@ describe('recorder', () => {
       carId: car.id,
       trackId: track01.id,
       strict: true,
-      lapMs: 1234,
+      timeMs: 1234,
     });
 
     let replay = createRaceState(createRng(recording.seed), track01.start);
@@ -56,7 +56,7 @@ describe('recorder', () => {
       carId: car.id,
       trackId: track01.id,
       strict: true,
-      lapMs: 0,
+      timeMs: 0,
     });
     rec.record({ x: 2, y: 0 });
     expect(snap.impulses).toHaveLength(1);

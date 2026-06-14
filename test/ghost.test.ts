@@ -25,7 +25,7 @@ const recording: Recording = {
   carId: car.id,
   trackId: track01.id,
   strict: true,
-  lapMs: 1000,
+  timeMs: 1000,
   impulses: inputs,
 };
 

@@ -17,6 +17,7 @@ function makeTrack(center: Tile): Track {
   return {
     id: 't',
     name: 't',
+    kind: 'loop',
     width: 3,
     height: 3,
     tileSize: TILE,
