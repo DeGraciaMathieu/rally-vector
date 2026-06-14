@@ -1,8 +1,10 @@
 // Type d'un circuit data-driven + lookups purs. L'INSTANCE d'un circuit est une
 // donnée (data/tracks/*.ts) ; ici, seulement la forme et la lecture, sans DOM ni
-// effet. La tilemap est une liste d'IDs ; la palette (donnée) résout id -> Surface.
+// effet. La tilemap est une liste de Tile : un SOL (sous la voiture) + un OBSTACLE
+// optionnel (posé dessus). Les palettes (données) résolvent id -> Surface/Obstacle.
 
 import { Segment } from './geometry';
+import { Obstacle, ObstacleId } from './obstacles';
 import { Surface, SurfaceId } from './surfaces';
 import { Vec2 } from './vec2';
 
@@ -11,14 +13,21 @@ export interface TrackStart {
   readonly heading: number; // angle initial de la voiture (rad)
 }
 
+// Une case : un sol obligatoire + un obstacle optionnel posé par-dessus.
+export interface Tile {
+  readonly surface: SurfaceId;
+  readonly obstacle?: ObstacleId;
+}
+
 export interface Track {
   readonly id: string;
   readonly name: string;
   readonly width: number; // en tuiles
   readonly height: number; // en tuiles
   readonly tileSize: number; // px par tuile
-  readonly tiles: readonly SurfaceId[]; // longueur width*height, indexé r*width+c
+  readonly tiles: readonly Tile[]; // longueur width*height, indexé r*width+c
   readonly palette: Readonly<Record<SurfaceId, Surface>>; // résolution id -> Surface
+  readonly obstacles: Readonly<Record<ObstacleId, Obstacle>>; // résolution id -> Obstacle
   readonly outOfBounds: SurfaceId; // hors-grille (mur, solide)
   readonly start: TrackStart;
   readonly finishLine: Segment; // orienté selon le sens de course
@@ -28,12 +37,46 @@ export interface Track {
 export const trackWidthPx = (t: Track): number => t.width * t.tileSize;
 export const trackHeightPx = (t: Track): number => t.height * t.tileSize;
 
-export function surfaceAt(t: Track, x: number, y: number): Surface {
-  const c = Math.floor(x / t.tileSize);
-  const r = Math.floor(y / t.tileSize);
-  if (c < 0 || r < 0 || c >= t.width || r >= t.height) return t.palette[t.outOfBounds];
-  return t.palette[t.tiles[r * t.width + c]];
+interface TileAt {
+  readonly tile: Tile;
+  readonly c: number;
+  readonly r: number;
 }
 
-export const isSolid = (t: Track, x: number, y: number): boolean =>
-  surfaceAt(t, x, y).solid;
+// Tuile contenant (x, y), ou null si hors-grille.
+function tileAt(t: Track, x: number, y: number): TileAt | null {
+  const c = Math.floor(x / t.tileSize);
+  const r = Math.floor(y / t.tileSize);
+  if (c < 0 || r < 0 || c >= t.width || r >= t.height) return null;
+  return { tile: t.tiles[r * t.width + c], c, r };
+}
+
+// Sol sous la voiture (grip/drag). Hors-grille = surface `outOfBounds`.
+export function surfaceAt(t: Track, x: number, y: number): Surface {
+  const at = tileAt(t, x, y);
+  if (!at) return t.palette[t.outOfBounds];
+  return t.palette[at.tile.surface];
+}
+
+// Obstacle posé sur la tuile contenant (x, y), ou null. Indépendant du sol.
+export function obstacleAt(t: Track, x: number, y: number): Obstacle | null {
+  const at = tileAt(t, x, y);
+  if (!at || !at.tile.obstacle) return null;
+  return t.obstacles[at.tile.obstacle];
+}
+
+// (x, y) est-il bloquant ? Sol solide (mur, hors-grille) OU disque d'un obstacle
+// solide (hitbox sous-tuile centrée sur la tuile).
+export function isSolid(t: Track, x: number, y: number): boolean {
+  const at = tileAt(t, x, y);
+  if (!at) return t.palette[t.outOfBounds].solid;
+  if (t.palette[at.tile.surface].solid) return true;
+  const obs = at.tile.obstacle ? t.obstacles[at.tile.obstacle] : undefined;
+  if (obs && obs.solid && obs.radius > 0) {
+    const cx = (at.c + 0.5) * t.tileSize;
+    const cy = (at.r + 0.5) * t.tileSize;
+    const rad = obs.radius * t.tileSize;
+    if ((x - cx) ** 2 + (y - cy) ** 2 <= rad * rad) return true;
+  }
+  return false;
+}
