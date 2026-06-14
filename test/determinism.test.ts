@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { RaceState, createRaceState } from '../src/domain/gameState';
 import { Vec2 } from '../src/domain/vec2';
 import { createRng } from '../src/domain/rng';
+import { cars } from '../src/data/cars';
 import { track01 } from '../src/data/tracks/track-01';
 import { TUNING } from '../src/data/tuning';
 import { advanceTurn } from '../src/systems/simulation';
@@ -12,7 +13,7 @@ const run = (seed: number, inputs: Vec2[]): string[] => {
   const trace: string[] = [JSON.stringify(state)];
   for (const impulse of inputs) {
     if (state.phase !== 'idle') break; // course finie (crash)
-    state = advanceTurn(state, track01, TUNING, impulse);
+    state = advanceTurn(state, track01, TUNING, cars[0], impulse);
     trace.push(JSON.stringify(state));
   }
   return trace;
