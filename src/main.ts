@@ -2,9 +2,11 @@
 // rAF et les chronos wall-clock (hors domain/, donc hors déterminisme). Aucune
 // règle de jeu ici : tout vient de la simulation et du LapTracker.
 
-import { surfaceAt, trackHeightPx, trackWidthPx } from './domain/track';
+import { Track, surfaceAt, trackHeightPx, trackWidthPx } from './domain/track';
+import { generateTrack } from './domain/trackgen';
 import { length } from './domain/vec2';
 import { cars } from './data/cars';
+import { GEN } from './data/genParams';
 import { tracks } from './data/tracks';
 import { TUNING } from './data/tuning';
 import { SIM_VERSION } from './data/version';
@@ -51,6 +53,10 @@ let strictCrash = true; // mode crash = fin systématique (préserve la version 
 const recorder = new Recorder();
 let ghostFrames: GhostFrame[] | null = null;
 
+// Étape (stage) : l'arrivée franchie une fois termine la spéciale.
+let stageFinished = false;
+let finishMs = 0;
+
 // Caméra cosmétique (jamais dans l'état). Bornes dérivées de la taille du circuit.
 let bounds: Bounds = makeBounds();
 let camera: Camera = centeredCamera();
@@ -81,7 +87,7 @@ let bestMs: number | undefined; // meilleur tour persistant pour (circuit, voitu
 function refreshGhost(): void {
   const rec = loadRecording(track.id, car.id);
   ghostFrames = buildGhost(rec, TUNING, SIM_VERSION);
-  bestMs = ghostFrames ? rec!.lapMs : undefined;
+  bestMs = ghostFrames ? rec!.timeMs : undefined;
 }
 
 const hud = {
@@ -100,6 +106,7 @@ const strictBtn = el('btn-strict');
 const carBtn = el('btn-car');
 const carStats = el('car-stats');
 const trackBtn = el('btn-track');
+const stageBtn = el('btn-stage');
 
 let toastTimer: number | undefined;
 function showToast(msg: string): void {
@@ -125,20 +132,33 @@ function reset(): void {
   recorder.reset();
   raceStartMs = null;
   lapStartMs = 0;
+  stageFinished = false;
   refreshGhost();
+  renderer.clearEffects();
   camera = centeredCamera();
   banner.classList.remove('show');
   updateHud();
 }
 
-function loadTrack(index: number): void {
-  trackIndex = index;
-  track = tracks[trackIndex];
+// Charge un circuit (boucle faite main ou étape générée) et relance la spéciale.
+function setTrack(next: Track): void {
+  track = next;
   sim = new Simulation(track, TUNING, car, SEED, strictCrash);
   renderer = new CanvasRenderer(canvas, track, TUNING);
   bounds = makeBounds();
   trackBtn.firstChild!.textContent = `Circuit : ${track.name} `;
   reset();
+}
+
+function loadTrack(index: number): void {
+  trackIndex = index;
+  setTrack(tracks[trackIndex]);
+}
+
+// Génère une nouvelle étape depuis un seed aléatoire (affiché, donc partageable).
+function newStage(): void {
+  const seed = Math.floor(Math.random() * 1e9);
+  setTrack(generateTrack(seed, GEN));
 }
 
 // Sélection de voiture (avant la course) : injecte la voiture dans la simulation,
@@ -161,7 +181,7 @@ function updateCarStats(): void {
 }
 
 function commit(): void {
-  if (sim.state.phase !== 'idle') return;
+  if (sim.state.phase !== 'idle' || stageFinished) return;
   const now = performance.now();
   if (raceStartMs === null) {
     raceStartMs = now;
@@ -188,7 +208,11 @@ function toggleStrict(): void {
   if (strictBtn.firstChild) strictBtn.firstChild.textContent = `Crash = fin : ${strictCrash ? 'ON' : 'OFF'} `;
 }
 
-function showBanner(): void {
+const bannerTitle = el('banner-title');
+const bannerText = el('banner-text');
+function showBanner(title: string, text: string): void {
+  bannerTitle.textContent = title;
+  bannerText.textContent = text;
   updateHud();
   banner.classList.add('show');
 }
@@ -200,6 +224,7 @@ aidBtn.addEventListener('click', toggleAid);
 strictBtn.addEventListener('click', toggleStrict);
 carBtn.addEventListener('click', () => loadCar((carIndex + 1) % cars.length));
 trackBtn.addEventListener('click', () => loadTrack((trackIndex + 1) % tracks.length));
+stageBtn.addEventListener('click', newStage);
 
 bindInput(canvas, VIEWPORT, {
   getCarPos: () => sim.state.car.pos,
@@ -217,32 +242,50 @@ function frame(now: number): void {
   const before = sim.state.phase;
   const { events, contact } = sim.update(now);
 
+  // Temps de référence : meilleur TOUR en boucle, temps d'ÉTAPE total en spéciale A→B.
+  const saveRecord = (timeMs: number): void => {
+    if (bestMs === undefined || timeMs < bestMs) {
+      bestMs = timeMs;
+      saveRecording(
+        recorder.toRecording({
+          simVersion: SIM_VERSION,
+          seed: SEED,
+          carId: car.id,
+          trackId: track.id,
+          strict: strictCrash,
+          timeMs,
+        }),
+      );
+    }
+  };
+
   for (const ev of events) {
-    if (ev.type === 'lapComplete') {
+    if (ev.type !== 'lapComplete') continue;
+    if (track.kind === 'stage') {
+      // Arrivée franchie : l'étape est terminée (une seule fois).
+      if (!stageFinished) {
+        stageFinished = true;
+        finishMs = now - (raceStartMs ?? now);
+        saveRecord(finishMs);
+      }
+    } else {
       const lapMs = now - lapStartMs;
       lapStartMs = now;
-      // Nouveau record : on persiste la séquence d'impulsions (le fantôme).
-      if (bestMs === undefined || lapMs < bestMs) {
-        bestMs = lapMs;
-        saveRecording(
-          recorder.toRecording({
-            simVersion: SIM_VERSION,
-            seed: SEED,
-            carId: car.id,
-            trackId: track.id,
-            strict: strictCrash,
-            lapMs,
-          }),
-        );
-      }
+      saveRecord(lapMs);
     }
   }
 
-  // Le tour vient de se terminer : rafraîchir le HUD (et le bandeau si crash).
+  // Le tour vient de se terminer : rafraîchir le HUD (et le bandeau si crash/arrivée).
   if (before === 'animating' && sim.state.phase !== 'animating') {
-    if (sim.state.phase === 'crashed') showBanner();
-    else if (contact === 'spin') showToast('Tête-à-queue !');
-    else if (contact === 'graze') showToast('Frôlement');
+    if (sim.state.phase === 'crashed') {
+      showBanner('Sortie de route', 'La voiture a tapé. En rallye, on ne pardonne pas — la course est terminée.');
+    } else if (stageFinished) {
+      showBanner('Spéciale terminée', `Temps : ${(finishMs / 1000).toFixed(1)}s`);
+    } else if (contact === 'spin') {
+      showToast('Tête-à-queue !');
+    } else if (contact === 'graze') {
+      showToast('Frôlement');
+    }
     updateHud();
   }
 
@@ -256,7 +299,7 @@ function frame(now: number): void {
 
   renderer.draw(now, sim.state, sim.anim, showAid, camera, car, ghostFrames);
 
-  if (raceStartMs !== null && sim.state.phase !== 'crashed') {
+  if (raceStartMs !== null && sim.state.phase !== 'crashed' && !stageFinished) {
     hud.time.textContent = ((now - raceStartMs) / 1000).toFixed(1) + 's';
   }
 
