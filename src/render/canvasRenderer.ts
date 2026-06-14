@@ -3,6 +3,7 @@
 // écrit dans l'état. L'interpolation entre deux tours est purement cosmétique. La
 // tilemap du Track est lue telle quelle (aucune logique de jeu ici).
 
+import { Car } from '../domain/car';
 import { RaceState, Tuning } from '../domain/gameState';
 import { firstHit } from '../domain/collision';
 import { step } from '../domain/physics';
@@ -27,7 +28,7 @@ export class CanvasRenderer {
   constructor(
     canvas: HTMLCanvasElement,
     private readonly track: Track,
-    private readonly tuning: Tuning,
+    tuning: Tuning,
   ) {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.dpr = dpr;
@@ -177,7 +178,14 @@ export class CanvasRenderer {
   }
 
   // ------------------------------- frame -------------------------------
-  draw(now: number, state: RaceState, anim: AnimView | null, showAid: boolean, camera: Camera): void {
+  draw(
+    now: number,
+    state: RaceState,
+    anim: AnimView | null,
+    showAid: boolean,
+    camera: Camera,
+    car: Car,
+  ): void {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.vw, this.vh);
 
@@ -191,10 +199,10 @@ export class CanvasRenderer {
 
     if (state.phase === 'animating' && anim) {
       const p = animPos(anim, now);
-      this.drawCar(p.x, p.y, anim.heading);
+      this.drawCar(p.x, p.y, anim.heading, car.livery);
     } else {
-      if (state.phase === 'idle') this.drawAimAndGhost(state, showAid);
-      this.drawCar(state.car.pos.x, state.car.pos.y, state.car.heading);
+      if (state.phase === 'idle') this.drawAimAndGhost(state, showAid, car);
+      this.drawCar(state.car.pos.x, state.car.pos.y, state.car.heading, car.livery);
     }
 
     ctx.restore();
@@ -215,7 +223,7 @@ export class CanvasRenderer {
     this.ctx.drawImage(this.cache, x0 * d, y0 * d, w * d, h * d, x0, y0, w, h);
   }
 
-  private drawCar(x: number, y: number, ang: number): void {
+  private drawCar(x: number, y: number, ang: number, livery: string): void {
     const ctx = this.ctx;
     ctx.save();
     ctx.translate(x, y);
@@ -224,7 +232,7 @@ export class CanvasRenderer {
     ctx.beginPath();
     ctx.ellipse(0, 3, 11, 7, 0, 0, TAU);
     ctx.fill();
-    ctx.fillStyle = '#ff5252';
+    ctx.fillStyle = livery;
     this.roundRect(-10, -6, 20, 12, 3);
     ctx.fill();
     ctx.fillStyle = '#1b1f27';
@@ -240,23 +248,23 @@ export class CanvasRenderer {
     ctx.restore();
   }
 
-  private drawAimAndGhost(state: RaceState, showAid: boolean): void {
+  private drawAimAndGhost(state: RaceState, showAid: boolean, car: Car): void {
     const ctx = this.ctx;
-    const car = state.car.pos;
+    const pos = state.car.pos;
     const impulse = state.impulse;
 
-    // anneau de poussée max
+    // anneau de poussée max (propre à la voiture)
     ctx.strokeStyle = 'rgba(255,179,0,0.18)';
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 4]);
     ctx.beginPath();
-    ctx.arc(car.x, car.y, this.tuning.maxImpulse, 0, TAU);
+    ctx.arc(pos.x, pos.y, car.maxImpulse, 0, TAU);
     ctx.stroke();
     ctx.setLineDash([]);
 
     // flèche d'impulsion (l'ordre du pilote)
     if (impulse.x || impulse.y) {
-      this.arrow(car.x, car.y, car.x + impulse.x, car.y + impulse.y, this.getCss('--amber'));
+      this.arrow(pos.x, pos.y, pos.x + impulse.x, pos.y + impulse.y, this.getCss('--amber'));
     }
 
     if (!showAid) return;
@@ -264,9 +272,9 @@ export class CanvasRenderer {
     const solid = (x: number, y: number): boolean => isSolid(this.track, x, y);
 
     // trajectoire RÉELLE prévue (poussée + inertie) sur ce tour
-    const nv = step(state.car.vel, impulse, surfaceAt(this.track, car.x, car.y), this.tuning);
-    const np: Vec2 = { x: car.x + nv.x, y: car.y + nv.y };
-    const hit = firstHit(car.x, car.y, np.x, np.y, solid);
+    const nv = step(state.car.vel, impulse, surfaceAt(this.track, pos.x, pos.y), car);
+    const np: Vec2 = { x: pos.x + nv.x, y: pos.y + nv.y };
+    const hit = firstHit(pos.x, pos.y, np.x, np.y, solid);
     const end = hit ?? np;
     const col = hit ? this.getCss('--danger') : this.getCss('--ghost');
 
@@ -274,7 +282,7 @@ export class CanvasRenderer {
     ctx.lineWidth = 2;
     ctx.setLineDash([5, 4]);
     ctx.beginPath();
-    ctx.moveTo(car.x, car.y);
+    ctx.moveTo(pos.x, pos.y);
     ctx.lineTo(end.x, end.y);
     ctx.stroke();
     ctx.setLineDash([]);
@@ -301,7 +309,7 @@ export class CanvasRenderer {
       let faded = false;
       ctx.setLineDash([2, 5]);
       for (let i = 0; i < 2 && !faded; i++) {
-        const v2 = step(v, { x: 0, y: 0 }, surfaceAt(this.track, p.x, p.y), this.tuning);
+        const v2 = step(v, { x: 0, y: 0 }, surfaceAt(this.track, p.x, p.y), car);
         const p2: Vec2 = { x: p.x + v2.x, y: p.y + v2.y };
         const h2 = firstHit(p.x, p.y, p2.x, p2.y, solid);
         const e2 = h2 ?? p2;

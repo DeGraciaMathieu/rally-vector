@@ -4,6 +4,7 @@
 
 import { surfaceAt, trackHeightPx, trackWidthPx } from './domain/track';
 import { length } from './domain/vec2';
+import { cars } from './data/cars';
 import { tracks } from './data/tracks';
 import { TUNING } from './data/tuning';
 import { CanvasRenderer } from './render/canvasRenderer';
@@ -34,7 +35,9 @@ const VIEWPORT = TUNING.camera.viewport;
 
 let trackIndex = 0;
 let track = tracks[trackIndex];
-let sim = new Simulation(track, TUNING, SEED);
+let carIndex = 0;
+let car = cars[carIndex];
+let sim = new Simulation(track, TUNING, car, SEED);
 let renderer = new CanvasRenderer(canvas, track, TUNING);
 
 let showAid = true;
@@ -78,6 +81,8 @@ const banner = el('banner');
 const toast = el('toast');
 const aidBtn = el('btn-aid');
 const strictBtn = el('btn-strict');
+const carBtn = el('btn-car');
+const carStats = el('car-stats');
 const trackBtn = el('btn-track');
 
 let toastTimer: number | undefined;
@@ -112,11 +117,30 @@ function reset(): void {
 function loadTrack(index: number): void {
   trackIndex = index;
   track = tracks[trackIndex];
-  sim = new Simulation(track, TUNING, SEED, strictCrash);
+  sim = new Simulation(track, TUNING, car, SEED, strictCrash);
   renderer = new CanvasRenderer(canvas, track, TUNING);
   bounds = makeBounds();
   trackBtn.firstChild!.textContent = `Circuit : ${track.name} `;
   reset();
+}
+
+// Sélection de voiture (avant la course) : injecte la voiture dans la simulation,
+// rafraîchit l'UI et relance la spéciale.
+function loadCar(index: number): void {
+  carIndex = index;
+  car = cars[carIndex];
+  sim.setCar(car);
+  carBtn.firstChild!.textContent = `Voiture : ${car.label} `;
+  updateCarStats();
+  reset();
+}
+
+function updateCarStats(): void {
+  carStats.innerHTML =
+    `<span><span class="k">pointe</span> <b>${car.maxSpeed}</b></span>` +
+    `<span><span class="k">poussée</span> <b>${car.maxImpulse}</b></span>` +
+    `<span><span class="k">grip</span> <b>×${car.gripFactor.toFixed(2)}</b></span>` +
+    `<span><span class="k">glisse</span> <b>${car.angleGripLoss.toFixed(2)}</b></span>`;
 }
 
 function commit(): void {
@@ -156,10 +180,12 @@ el('btn-restart').addEventListener('click', reset);
 el('banner-restart').addEventListener('click', reset);
 aidBtn.addEventListener('click', toggleAid);
 strictBtn.addEventListener('click', toggleStrict);
+carBtn.addEventListener('click', () => loadCar((carIndex + 1) % cars.length));
 trackBtn.addEventListener('click', () => loadTrack((trackIndex + 1) % tracks.length));
 
-bindInput(canvas, VIEWPORT, TUNING.maxImpulse, {
+bindInput(canvas, VIEWPORT, {
   getCarPos: () => sim.state.car.pos,
+  getMaxImpulse: () => car.maxImpulse,
   canAim: () => sim.state.phase === 'idle',
   screenToWorld: (screen) => screenToWorld(camera, VIEWPORT, screen),
   onAim: (impulse) => sim.aim(impulse),
@@ -197,7 +223,7 @@ function frame(now: number): void {
     camera = follow({ ...camera, zoom: TUNING.camera.followZoom }, target, VIEWPORT, bounds, smoothing);
   }
 
-  renderer.draw(now, sim.state, sim.anim, showAid, camera);
+  renderer.draw(now, sim.state, sim.anim, showAid, camera, car);
 
   if (raceStartMs !== null && sim.state.phase !== 'crashed') {
     hud.time.textContent = ((now - raceStartMs) / 1000).toFixed(1) + 's';
@@ -207,5 +233,7 @@ function frame(now: number): void {
 }
 
 trackBtn.firstChild!.textContent = `Circuit : ${track.name} `;
+carBtn.firstChild!.textContent = `Voiture : ${car.label} `;
+updateCarStats();
 reset();
 requestAnimationFrame(frame);

@@ -109,6 +109,10 @@
   .legend { display:flex; flex-wrap:wrap; gap:14px; margin-top:14px; font-size:12px; color:var(--ink-dim); }
   .legend span { display:flex; align-items:center; }
 
+  .car-stats { display:flex; flex-wrap:wrap; gap:12px; margin-top:12px; font-size:12px; color:var(--ink-dim); }
+  .car-stats .k { color:var(--ink-dim); }
+  .car-stats b { color:var(--amber); font-weight:700; }
+
   /* Toast transitoire (tête-à-queue, frôlement) */
   .toast {
     position:absolute; left:50%; top:16px; transform:translateX(-50%);
@@ -150,9 +154,12 @@
     <button class="primary" id="btn-go">Valider le déplacement <kbd>Espace</kbd></button>
     <button id="btn-aid" aria-pressed="true">Aide à la visée : ON <kbd>A</kbd></button>
     <button id="btn-strict" aria-pressed="true">Crash = fin : ON </button>
+    <button id="btn-car">Voiture : … </button>
     <button id="btn-track">Circuit : … </button>
     <button id="btn-restart">Recommencer <kbd>R</kbd></button>
   </div>
+
+  <div class="car-stats" id="car-stats"></div>
 
   <p class="hint">
     Tire une flèche depuis la voiture (souris ou doigt) pour donner une <b style="color:var(--amber)">impulsion</b> :
