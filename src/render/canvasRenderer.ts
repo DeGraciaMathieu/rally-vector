@@ -10,8 +10,9 @@ import { step } from '../domain/physics';
 import { Surface } from '../domain/surfaces';
 import { Track, isSolid, surfaceAt, trackHeightPx, trackWidthPx } from '../domain/track';
 import { Vec2 } from '../domain/vec2';
-import { AnimView, animPos } from '../systems/simulation';
+import { AnimView, animEase, animPos } from '../systems/simulation';
 import { Camera } from '../systems/camera';
+import { GhostFrame } from '../systems/ghost';
 
 const TAU = Math.PI * 2;
 
@@ -185,6 +186,7 @@ export class CanvasRenderer {
     showAid: boolean,
     camera: Camera,
     car: Car,
+    ghost: GhostFrame[] | null,
   ): void {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.vw, this.vh);
@@ -197,6 +199,13 @@ export class CanvasRenderer {
 
     this.blitVisible(camera);
 
+    // Fantôme sous la voiture : synchronisé au même index de tour, interpolé par la
+    // même progression d'animation que le joueur.
+    if (ghost) {
+      const progress = state.phase === 'animating' && anim ? animEase(anim, now) : 0;
+      this.drawGhost(ghost, state.turns, progress, car.livery);
+    }
+
     if (state.phase === 'animating' && anim) {
       const p = animPos(anim, now);
       this.drawCar(p.x, p.y, anim.heading, car.livery);
@@ -205,6 +214,21 @@ export class CanvasRenderer {
       this.drawCar(state.car.pos.x, state.car.pos.y, state.car.heading, car.livery);
     }
 
+    ctx.restore();
+  }
+
+  // Voiture fantôme translucide à l'index de tour courant, interpolée vers le tour
+  // suivant selon `progress`. Au-delà de la course enregistrée, le fantôme disparaît.
+  private drawGhost(frames: GhostFrame[], turn: number, progress: number, livery: string): void {
+    if (turn >= frames.length) return;
+    const a = frames[turn];
+    const b = frames[turn + 1] ?? a;
+    const x = a.pos.x + (b.pos.x - a.pos.x) * progress;
+    const y = a.pos.y + (b.pos.y - a.pos.y) * progress;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    this.drawCar(x, y, b.heading, livery);
     ctx.restore();
   }
 

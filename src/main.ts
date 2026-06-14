@@ -7,6 +7,7 @@ import { length } from './domain/vec2';
 import { cars } from './data/cars';
 import { tracks } from './data/tracks';
 import { TUNING } from './data/tuning';
+import { SIM_VERSION } from './data/version';
 import { CanvasRenderer } from './render/canvasRenderer';
 import {
   Bounds,
@@ -17,8 +18,11 @@ import {
   followTarget,
   screenToWorld,
 } from './systems/camera';
+import { GhostFrame, buildGhost } from './systems/ghost';
 import { bindInput } from './systems/input';
+import { Recorder } from './systems/recorder';
 import { Simulation, animPos } from './systems/simulation';
+import { loadRecording, saveRecording } from './systems/storage';
 
 // Seed de gameplay : injecté dans l'état (préparation P5), pas encore consommé.
 const SEED = 1;
@@ -43,6 +47,10 @@ let renderer = new CanvasRenderer(canvas, track, TUNING);
 let showAid = true;
 let strictCrash = true; // mode crash = fin systématique (préserve la version d'origine)
 
+// Contre-la-montre : enregistreur de la course en cours + fantôme du meilleur record.
+const recorder = new Recorder();
+let ghostFrames: GhostFrame[] | null = null;
+
 // Caméra cosmétique (jamais dans l'état). Bornes dérivées de la taille du circuit.
 let bounds: Bounds = makeBounds();
 let camera: Camera = centeredCamera();
@@ -66,7 +74,15 @@ function focusPoint(now: number): { x: number; y: number } {
 // Chronos wall-clock — orchestration temporelle (systems), jamais dans l'état.
 let raceStartMs: number | null = null;
 let lapStartMs = 0;
-let bestLap: number | undefined;
+let bestMs: number | undefined; // meilleur tour persistant pour (circuit, voiture)
+
+// (Re)charge le meilleur record du couple (circuit, voiture) et reconstruit son
+// fantôme. Un record obsolète (simVersion) est ignoré -> pas de fantôme, pas de best.
+function refreshGhost(): void {
+  const rec = loadRecording(track.id, car.id);
+  ghostFrames = buildGhost(rec, TUNING, SIM_VERSION);
+  bestMs = ghostFrames ? rec!.lapMs : undefined;
+}
 
 const hud = {
   turn: el('hud-turn'),
@@ -97,7 +113,7 @@ function updateHud(): void {
   const st = sim.state;
   hud.turn.textContent = String(st.turns);
   hud.lap.textContent = String(st.laps);
-  hud.best.textContent = bestLap !== undefined ? bestLap.toFixed(1) + 's' : '—';
+  hud.best.textContent = bestMs !== undefined ? (bestMs / 1000).toFixed(1) + 's' : '—';
   hud.speed.textContent = String(Math.round(length(st.car.vel)));
   const s = surfaceAt(track, st.car.pos.x, st.car.pos.y);
   hud.surf.textContent = s.label;
@@ -106,9 +122,10 @@ function updateHud(): void {
 
 function reset(): void {
   sim.reset(SEED);
+  recorder.reset();
   raceStartMs = null;
   lapStartMs = 0;
-  bestLap = undefined;
+  refreshGhost();
   camera = centeredCamera();
   banner.classList.remove('show');
   updateHud();
@@ -150,6 +167,7 @@ function commit(): void {
     raceStartMs = now;
     lapStartMs = now;
   }
+  recorder.record(sim.state.impulse); // l'impulsion validée = celle que résout le tour
   sim.commit(now);
 }
 
@@ -201,9 +219,22 @@ function frame(now: number): void {
 
   for (const ev of events) {
     if (ev.type === 'lapComplete') {
-      const lap = (now - lapStartMs) / 1000;
-      if (bestLap === undefined || lap < bestLap) bestLap = lap;
+      const lapMs = now - lapStartMs;
       lapStartMs = now;
+      // Nouveau record : on persiste la séquence d'impulsions (le fantôme).
+      if (bestMs === undefined || lapMs < bestMs) {
+        bestMs = lapMs;
+        saveRecording(
+          recorder.toRecording({
+            simVersion: SIM_VERSION,
+            seed: SEED,
+            carId: car.id,
+            trackId: track.id,
+            strict: strictCrash,
+            lapMs,
+          }),
+        );
+      }
     }
   }
 
@@ -223,7 +254,7 @@ function frame(now: number): void {
     camera = follow({ ...camera, zoom: TUNING.camera.followZoom }, target, VIEWPORT, bounds, smoothing);
   }
 
-  renderer.draw(now, sim.state, sim.anim, showAid, camera, car);
+  renderer.draw(now, sim.state, sim.anim, showAid, camera, car, ghostFrames);
 
   if (raceStartMs !== null && sim.state.phase !== 'crashed') {
     hud.time.textContent = ((now - raceStartMs) / 1000).toFixed(1) + 's';
