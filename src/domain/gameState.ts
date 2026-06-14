@@ -2,6 +2,7 @@
 // tout ce qui est déterministe vit ici ; l'animation et les chronos (wall-clock)
 // restent dans systems/. domain/ ne mute jamais ses arguments.
 
+import { Car } from './car';
 import { Contact, ContactPolicy, classifyContact, firstHit } from './collision';
 import { step } from './physics';
 import { RngState, nextRandom } from './rng';
@@ -28,13 +29,10 @@ export interface RaceState {
   readonly rng: RngState;
 }
 
-// Réglages d'équilibrage. La TABLE de valeurs vit dans data/tuning.ts ;
-// step() n'en lit qu'un sous-ensemble (maxSpeed, angleGripLoss). La géométrie du
-// circuit (tuiles, dimensions) vit désormais dans le Track, pas ici.
+// Réglages d'équilibrage GLOBAUX (indépendants de la voiture et du circuit). Les
+// caractéristiques véhicule (maxImpulse, maxSpeed, grip…) vivent désormais dans le
+// Car ; la géométrie du circuit dans le Track.
 export interface Tuning {
-  readonly maxImpulse: number;
-  readonly maxSpeed: number;
-  readonly angleGripLoss: number;
   readonly anim: { readonly min: number; readonly max: number; readonly pxPerMs: number };
   // Conséquences au contact (PRD 04). Seuils en fraction de maxSpeed.
   readonly contact: {
@@ -85,31 +83,32 @@ export function resolveMove(
   state: RaceState,
   surf: Surface,
   tuning: Tuning,
+  car: Car,
   isSolid: (x: number, y: number) => boolean,
   contactAt: (x: number, y: number) => ContactPolicy,
   strict: boolean,
 ): ResolvedMove {
-  const { car, impulse } = state;
-  const newVel = step(car.vel, impulse, surf, tuning);
-  const target = add(car.pos, newVel);
-  const hit = firstHit(car.pos.x, car.pos.y, target.x, target.y, isSolid);
+  const { car: body, impulse } = state;
+  const newVel = step(body.vel, impulse, surf, car);
+  const target = add(body.pos, newVel);
+  const hit = firstHit(body.pos.x, body.pos.y, target.x, target.y, isSolid);
   const to = hit ? { x: hit.x, y: hit.y } : target;
-  const delta = { x: to.x - car.pos.x, y: to.y - car.pos.y };
-  const heading = length(delta) > 0.5 ? angle(delta) : car.heading;
+  const delta = { x: to.x - body.pos.x, y: to.y - body.pos.y };
+  const heading = length(delta) > 0.5 ? angle(delta) : body.heading;
   let contact: Contact | null = null;
   if (hit) {
     const kind = classifyContact(
       contactAt(hit.x, hit.y),
       length(newVel),
       {
-        fatalSpeed: tuning.maxSpeed * tuning.contact.fatalSpeedFrac,
-        spinSpeed: tuning.maxSpeed * tuning.contact.spinSpeedFrac,
+        fatalSpeed: car.maxSpeed * tuning.contact.fatalSpeedFrac,
+        spinSpeed: car.maxSpeed * tuning.contact.spinSpeedFrac,
       },
       strict,
     );
     contact = { kind };
   }
-  return { from: car.pos, to, newVel, heading, contact };
+  return { from: body.pos, to, newVel, heading, contact };
 }
 
 // Entre en phase animée (transitoire, pilotée par systems/). L'animation est
