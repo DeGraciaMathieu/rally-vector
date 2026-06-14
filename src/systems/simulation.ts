@@ -23,16 +23,31 @@ import { Vec2, length, sub } from '../domain/vec2';
 import { LapEvent, LapTracker } from './lap';
 
 // Vue d'animation lue par render/ (jamais écrite par lui). Purement visuelle.
+// `skid` et `speed` sont des FLAGS EN LECTURE SEULE exposés pour le game feel
+// (PRD 08) : render/ les visualise (traces, secousse) sans rien décider.
 export interface AnimView {
   readonly from: Vec2;
   readonly to: Vec2;
   readonly heading: number;
   readonly t0: number; // début (wall-clock ms)
   readonly dur: number; // durée (ms)
+  readonly skid: number; // intensité de dérapage du tour (0..1), dérivée de la perte de grip
+  readonly speed: number; // vitesse à l'entrée du tour (pour la secousse d'impact)
 }
 
 interface Anim extends AnimView {
   readonly move: ResolvedMove;
+}
+
+// Intensité de dérapage : mêmes facteurs que la perte de grip de step() (écart
+// d'angle entre inertie et impulsion × fraction de vitesse). Lecture seule, cosmétique.
+function skidAmount(vel: Vec2, impulse: Vec2, maxSpeed: number): number {
+  const speed = length(vel);
+  if (speed <= 1 || (!impulse.x && !impulse.y)) return 0;
+  const imag = length(impulse) || 1;
+  const cos = (vel.x * impulse.x + vel.y * impulse.y) / (speed * imag);
+  const turn = (1 - cos) / 2; // 0 (tout droit) -> 1 (demi-tour)
+  return turn * Math.min(speed / maxSpeed, 1);
 }
 
 // Progression interpolée (easing out) d'un tour animé, dans [0, 1]. Cosmétique.
@@ -145,8 +160,11 @@ export class Simulation {
     const dist = length(sub(move.to, move.from));
     const { min, max, pxPerMs } = this.tuning.anim;
     const dur = Math.min(max, Math.max(min, dist / pxPerMs));
+    // Flags cosmétiques lus avant beginMove (vitesse/impulsion d'entrée du tour).
+    const skid = skidAmount(this._state.car.vel, this._state.impulse, this._car.maxSpeed);
+    const speed = length(this._state.car.vel);
     this._state = beginMove(this._state);
-    this._anim = { from: move.from, to: move.to, heading: move.heading, t0: now, dur, move };
+    this._anim = { from: move.from, to: move.to, heading: move.heading, t0: now, dur, move, skid, speed };
     return true;
   }
 
