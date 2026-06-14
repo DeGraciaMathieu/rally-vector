@@ -3,7 +3,9 @@
 // dimensions de grille que le circuit 01 (canvas identique). Iso-format, pas iso-visuel.
 
 import type { SurfaceId } from '../../domain/surfaces';
-import type { Track } from '../../domain/track';
+import type { ObstacleId } from '../../domain/obstacles';
+import type { Tile, Track } from '../../domain/track';
+import { O } from '../obstacles';
 import { S } from '../surfaces';
 
 const TILE = 36;
@@ -19,22 +21,30 @@ const inRing = (c: number, r: number): boolean => {
   return bandH || bandV;
 };
 
-const buildTiles = (): SurfaceId[] => {
-  const tiles: SurfaceId[] = new Array(WIDTH * HEIGHT);
+const buildTiles = (): Tile[] => {
+  const tiles: Tile[] = new Array(WIDTH * HEIGHT);
   const idx = (c: number, r: number): number => r * WIDTH + c;
 
   for (let r = 0; r < HEIGHT; r++)
-    for (let c = 0; c < WIDTH; c++) tiles[idx(c, r)] = inRing(c, r) ? 'ROAD' : 'WALL';
+    for (let c = 0; c < WIDTH; c++) tiles[idx(c, r)] = { surface: inRing(c, r) ? 'ROAD' : 'WALL' };
 
   const paint = (c0: number, r0: number, c1: number, r1: number, surf: SurfaceId): void => {
     for (let r = r0; r <= r1; r++)
-      for (let c = c0; c <= c1; c++) if (inRing(c, r)) tiles[idx(c, r)] = surf;
+      for (let c = c0; c <= c1; c++)
+        if (inRing(c, r)) tiles[idx(c, r)] = { ...tiles[idx(c, r)], surface: surf };
   };
   paint(21, 1, 22, 14, 'DIRT'); // toute la droite = terre
   paint(1, 13, 22, 14, 'GRAVEL'); // toute la ligne du bas = gravier
   paint(10, 13, 12, 14, 'WATER'); // flaque au milieu du bas
   paint(1, 9, 2, 14, 'GRAVEL'); // sortie du virage bas-gauche = gravier
   paint(17, 1, 20, 2, 'GRAVEL'); // corde du virage haut-droite = gravier
+
+  // Obstacle de design : un arbre sur la ligne droite du haut, sur la voie
+  // extérieure (rang 1) — à lire et contourner par la voie intérieure (rang 2).
+  const place = (c: number, r: number, obstacle: ObstacleId): void => {
+    tiles[idx(c, r)] = { ...tiles[idx(c, r)], obstacle };
+  };
+  place(13, 1, 'TREE');
 
   return tiles;
 };
@@ -50,6 +60,7 @@ export const track02: Track = {
   tileSize: TILE,
   tiles: buildTiles(),
   palette: S,
+  obstacles: O,
   outOfBounds: 'WALL',
   start: { pos: { x: (start.c + 0.5) * TILE, y: (start.r + 0.5) * TILE }, heading: 0 },
   finishLine: { a: { x: 3 * TILE, y: 1 * TILE }, b: { x: 3 * TILE, y: 3 * TILE } },

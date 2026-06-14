@@ -4,7 +4,8 @@
 // dans le sens horaire de la course. Un seul circuit historique ; procgen = PRD 07.
 
 import type { SurfaceId } from '../../domain/surfaces';
-import type { Track } from '../../domain/track';
+import type { Tile, Track } from '../../domain/track';
+import { O } from '../obstacles';
 import { S } from '../surfaces';
 
 const TILE = 36;
@@ -20,23 +21,24 @@ const inRing = (c: number, r: number): boolean => {
   return bandH || bandV;
 };
 
-const buildTiles = (): SurfaceId[] => {
-  const tiles: SurfaceId[] = new Array(WIDTH * HEIGHT);
+const buildTiles = (): Tile[] => {
+  const tiles: Tile[] = new Array(WIDTH * HEIGHT);
   const idx = (c: number, r: number): number => r * WIDTH + c;
 
   // 1) base : anneau = ROUTE, le reste = MUR.
   for (let r = 0; r < HEIGHT; r++)
-    for (let c = 0; c < WIDTH; c++) tiles[idx(c, r)] = inRing(c, r) ? 'ROAD' : 'WALL';
+    for (let c = 0; c < WIDTH; c++) tiles[idx(c, r)] = { surface: inRing(c, r) ? 'ROAD' : 'WALL' };
 
   // 2) zones de surface peintes (rectangles), bornées à l'anneau.
   const paint = (c0: number, r0: number, c1: number, r1: number, surf: SurfaceId): void => {
     for (let r = r0; r <= r1; r++)
-      for (let c = c0; c <= c1; c++) if (inRing(c, r)) tiles[idx(c, r)] = surf;
+      for (let c = c0; c <= c1; c++)
+        if (inRing(c, r)) tiles[idx(c, r)] = { ...tiles[idx(c, r)], surface: surf };
   };
   paint(6, 12, 17, 14, 'DIRT'); // ligne droite du bas = terre
   paint(17, 1, 22, 3, 'GRAVEL'); // corde du virage rapide haut-droite = gravier
   paint(1, 12, 5, 14, 'GRAVEL'); // sortie du virage bas-gauche = gravier
-  paint(11, 13, 12, 14, 'WATER'); // flaque posée sur la terre (démo obstacle)
+  paint(11, 13, 12, 14, 'WATER'); // flaque posée sur la terre
 
   return tiles;
 };
@@ -52,6 +54,7 @@ export const track01: Track = {
   tileSize: TILE,
   tiles: buildTiles(),
   palette: S,
+  obstacles: O,
   outOfBounds: 'WALL',
   start: { pos: { x: (start.c + 0.5) * TILE, y: (start.r + 0.5) * TILE }, heading: 0 },
   // Ligne d'arrivée verticale sur la droite du haut, orientée a->b (vers le bas)
