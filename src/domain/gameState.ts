@@ -6,6 +6,7 @@ import { firstHit } from './collision';
 import { step } from './physics';
 import { RngState } from './rng';
 import { Surface } from './surfaces';
+import { TrackStart } from './track';
 import { Vec2, ZERO, add, length, angle } from './vec2';
 
 export type RacePhase = 'idle' | 'animating' | 'crashed';
@@ -22,16 +23,13 @@ export interface RaceState {
   readonly impulse: Vec2; // visée courante (ordre du pilote)
   readonly turns: number;
   readonly laps: number;
-  readonly armed: boolean; // checkpoint validé sur la boucle en cours
   readonly rng: RngState;
 }
 
 // Réglages d'équilibrage. La TABLE de valeurs vit dans data/tuning.ts ;
-// step() n'en lit qu'un sous-ensemble (maxSpeed, angleGripLoss).
+// step() n'en lit qu'un sous-ensemble (maxSpeed, angleGripLoss). La géométrie du
+// circuit (tuiles, dimensions) vit désormais dans le Track, pas ici.
 export interface Tuning {
-  readonly TILE: number;
-  readonly COLS: number;
-  readonly ROWS: number;
   readonly maxImpulse: number;
   readonly maxSpeed: number;
   readonly angleGripLoss: number;
@@ -48,14 +46,13 @@ export interface ResolvedMove {
   readonly crash: boolean;
 }
 
-export function createRaceState(seed: RngState, startPos: Vec2): RaceState {
+export function createRaceState(seed: RngState, start: TrackStart): RaceState {
   return {
-    car: { pos: startPos, vel: ZERO, heading: 0 },
+    car: { pos: start.pos, vel: ZERO, heading: start.heading },
     phase: 'idle',
     impulse: ZERO,
     turns: 0,
     laps: 0,
-    armed: false,
     rng: seed,
   };
 }
@@ -106,12 +103,8 @@ export function applyMove(state: RaceState, move: ResolvedMove): RaceState {
   };
 }
 
-// Transitions de boucle — le DÉTECTION géométrique vit dans systems/lap.ts,
-// mais la mutation d'état passe toujours par domain/.
-export function arm(state: RaceState): RaceState {
-  return state.armed ? state : { ...state, armed: true };
-}
-
+// Compte une boucle. La détection géométrique ordonnée vit dans systems/lap.ts
+// (LapTracker) ; la mutation du compteur passe toujours par domain/.
 export function completeLap(state: RaceState): RaceState {
-  return { ...state, laps: state.laps + 1, armed: false };
+  return { ...state, laps: state.laps + 1 };
 }
