@@ -8,11 +8,11 @@ import { advanceTurn } from '../src/systems/simulation';
 
 // Rejoue une séquence d'impulsions depuis un seed et sérialise chaque RaceState.
 const run = (seed: number, inputs: Vec2[]): string[] => {
-  let state: RaceState = createRaceState(createRng(seed), track01.startPos);
+  let state: RaceState = createRaceState(createRng(seed), track01.start);
   const trace: string[] = [JSON.stringify(state)];
   for (const impulse of inputs) {
     if (state.phase !== 'idle') break; // course finie (crash)
-    state = advanceTurn(state, track01, TUNING, impulse).state;
+    state = advanceTurn(state, track01, TUNING, impulse);
     trace.push(JSON.stringify(state));
   }
   return trace;

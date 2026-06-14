@@ -23,7 +23,7 @@ describe('collision.firstHit', () => {
     expect(isSolid(track01, -5, 50)).toBe(true);
     const solid = (x: number, y: number): boolean => isSolid(track01, x, y);
     // depuis le départ vers la gauche hors-grille : on finit par taper
-    const start = track01.startPos;
+    const start = track01.start.pos;
     const hit = firstHit(start.x, start.y, -50, start.y, solid);
     expect(hit).not.toBeNull();
   });
