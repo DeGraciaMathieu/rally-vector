@@ -45,6 +45,9 @@ const buildTiles = (): Tile[] => {
     tiles[idx(c, r)] = { ...tiles[idx(c, r)], obstacle };
   };
   place(13, 1, 'TREE');
+  // Bottes de paille sur la voie intérieure du haut : cible souple (en mode
+  // conséquences, un contact lent donne un tête-à-queue plutôt qu'une fin).
+  place(15, 2, 'BALES');
 
   return tiles;
 };
