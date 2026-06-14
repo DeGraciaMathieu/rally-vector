@@ -1,6 +1,8 @@
 // Driver de simulation : gère idle | animating | crashed et le timing (wall-clock)
 // de l'animation entre deux tours. L'animation est COSMÉTIQUE : elle n'influence
 // jamais l'état déterministe, qui ne change qu'au franchissement du tour via domain/.
+// Le comptage de tours est délégué au LapTracker (ordonné) ; le compteur du
+// RaceState est mis à jour via domain/completeLap.
 
 import {
   RaceState,
@@ -8,6 +10,7 @@ import {
   Tuning,
   applyMove,
   beginMove,
+  completeLap,
   createRaceState,
   resolveMove,
   setImpulse,
@@ -15,7 +18,7 @@ import {
 import { createRng } from '../domain/rng';
 import { Track, isSolid, surfaceAt } from '../domain/track';
 import { Vec2, length, sub } from '../domain/vec2';
-import { LapResult, detectLap } from './lap';
+import { LapEvent, LapTracker } from './lap';
 
 // Vue d'animation lue par render/ (jamais écrite par lui). Purement visuelle.
 export interface AnimView {
@@ -30,38 +33,31 @@ interface Anim extends AnimView {
   readonly move: ResolvedMove;
 }
 
-export interface TurnOutcome {
-  readonly state: RaceState;
-  readonly lapCompleted: boolean;
-}
-
-// Cœur déterministe d'un tour, sans animation : setImpulse → résoudre → appliquer
-// → détecter la boucle. Utilisé par les tests de déterminisme et réutilisable.
-export function advanceTurn(
-  state: RaceState,
-  track: Track,
-  tuning: Tuning,
-  impulse: Vec2,
-): TurnOutcome {
+// Cœur déterministe d'un tour, sans animation ni comptage : setImpulse → résoudre
+// → appliquer. Utilisé par les tests de déterminisme du RaceState et réutilisable.
+export function advanceTurn(state: RaceState, track: Track, tuning: Tuning, impulse: Vec2): RaceState {
   const aimed = setImpulse(state, impulse);
   const surf = surfaceAt(track, aimed.car.pos.x, aimed.car.pos.y);
   const move = resolveMove(aimed, surf, tuning, (x, y) => isSolid(track, x, y));
-  const applied = applyMove(aimed, move);
-  if (applied.phase === 'crashed') return { state: applied, lapCompleted: false };
-  const lap: LapResult = detectLap(applied, track, move.from, move.to);
-  return { state: lap.state, lapCompleted: lap.lapCompleted };
+  return applyMove(aimed, move);
+}
+
+export interface TurnResult {
+  readonly events: LapEvent[];
 }
 
 export class Simulation {
   private _state: RaceState;
   private _anim: Anim | null = null;
+  private readonly laps: LapTracker;
 
   constructor(
     private readonly track: Track,
     private readonly tuning: Tuning,
     private seed: number,
   ) {
-    this._state = createRaceState(createRng(seed), track.startPos);
+    this._state = createRaceState(createRng(seed), track.start);
+    this.laps = new LapTracker(track);
   }
 
   get state(): RaceState {
@@ -74,8 +70,9 @@ export class Simulation {
 
   reset(seed: number = this.seed): void {
     this.seed = seed;
-    this._state = createRaceState(createRng(seed), this.track.startPos);
+    this._state = createRaceState(createRng(seed), this.track.start);
     this._anim = null;
+    this.laps.reset();
   }
 
   // Met à jour la visée courante (seulement à l'arrêt).
@@ -98,20 +95,25 @@ export class Simulation {
   }
 
   // Avance le temps : finalise le tour quand l'animation est terminée.
-  // Renvoie l'éventuelle complétion de boucle (pour le chrono côté root).
-  update(now: number): { lapCompleted: boolean } {
-    if (this._state.phase !== 'animating' || !this._anim) return { lapCompleted: false };
-    if (now - this._anim.t0 < this._anim.dur) return { lapCompleted: false };
+  // Renvoie les événements de boucle (pour le chrono côté root).
+  update(now: number): TurnResult {
+    if (this._state.phase !== 'animating' || !this._anim) return { events: [] };
+    if (now - this._anim.t0 < this._anim.dur) return { events: [] };
 
     const move = this._anim.move;
     this._anim = null;
     const applied = applyMove(this._state, move);
     if (applied.phase === 'crashed') {
       this._state = applied;
-      return { lapCompleted: false };
+      return { events: [] };
     }
-    const lap = detectLap(applied, this.track, move.from, move.to);
-    this._state = lap.state;
-    return { lapCompleted: lap.lapCompleted };
+
+    const events = this.laps.update(move.from, move.to);
+    let next = applied;
+    for (const ev of events) {
+      if (ev.type === 'lapComplete') next = completeLap(next);
+    }
+    this._state = next;
+    return { events };
   }
 }

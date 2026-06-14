@@ -2,7 +2,7 @@
 // bornée et câble les événements DOM. Ne décide d'aucune règle de jeu : il appelle
 // des callbacks fournis par le root.
 
-import { Track, trackHeight, trackWidth } from '../domain/track';
+import { Track, trackHeightPx, trackWidthPx } from '../domain/track';
 import { Vec2, clampLength, sub } from '../domain/vec2';
 
 // Impulsion = (point visé − position voiture), bornée à maxImpulse. Pure.
@@ -24,8 +24,8 @@ export function bindInput(
   maxImpulse: number,
   cb: InputCallbacks,
 ): void {
-  const W = trackWidth(track);
-  const H = trackHeight(track);
+  const W = trackWidthPx(track);
+  const H = trackHeightPx(track);
 
   const toWorld = (ev: PointerEvent): Vec2 => {
     const r = canvas.getBoundingClientRect();
