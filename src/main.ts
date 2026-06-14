@@ -1,10 +1,10 @@
 // Composition root : câble systems + render, gère le HUD, les boutons, la boucle
 // rAF et les chronos wall-clock (hors domain/, donc hors déterminisme). Aucune
-// règle de jeu ici : tout vient de la simulation.
+// règle de jeu ici : tout vient de la simulation et du LapTracker.
 
 import { surfaceAt } from './domain/track';
 import { length } from './domain/vec2';
-import { track01 } from './data/tracks/track-01';
+import { tracks } from './data/tracks';
 import { TUNING } from './data/tuning';
 import { CanvasRenderer } from './render/canvasRenderer';
 import { bindInput } from './systems/input';
@@ -20,8 +20,11 @@ const el = (id: string): HTMLElement => {
 };
 
 const canvas = el('game') as HTMLCanvasElement;
-const sim = new Simulation(track01, TUNING, SEED);
-const renderer = new CanvasRenderer(canvas, track01, TUNING);
+
+let trackIndex = 0;
+let track = tracks[trackIndex];
+let sim = new Simulation(track, TUNING, SEED);
+let renderer = new CanvasRenderer(canvas, track, TUNING);
 
 let showAid = true;
 
@@ -41,6 +44,7 @@ const hud = {
 };
 const banner = el('banner');
 const aidBtn = el('btn-aid');
+const trackBtn = el('btn-track');
 
 function updateHud(): void {
   const st = sim.state;
@@ -48,7 +52,7 @@ function updateHud(): void {
   hud.lap.textContent = String(st.laps);
   hud.best.textContent = bestLap !== undefined ? bestLap.toFixed(1) + 's' : '—';
   hud.speed.textContent = String(Math.round(length(st.car.vel)));
-  const s = surfaceAt(track01, st.car.pos.x, st.car.pos.y);
+  const s = surfaceAt(track, st.car.pos.x, st.car.pos.y);
   hud.surf.textContent = s.label;
   hud.surfDot.style.background = s.dot;
 }
@@ -60,6 +64,15 @@ function reset(): void {
   bestLap = undefined;
   banner.classList.remove('show');
   updateHud();
+}
+
+function loadTrack(index: number): void {
+  trackIndex = index;
+  track = tracks[trackIndex];
+  sim = new Simulation(track, TUNING, SEED);
+  renderer = new CanvasRenderer(canvas, track, TUNING);
+  trackBtn.firstChild!.textContent = `Circuit : ${track.name} `;
+  reset();
 }
 
 function commit(): void {
@@ -87,8 +100,10 @@ el('btn-go').addEventListener('click', commit);
 el('btn-restart').addEventListener('click', reset);
 el('banner-restart').addEventListener('click', reset);
 aidBtn.addEventListener('click', toggleAid);
+trackBtn.addEventListener('click', () => loadTrack((trackIndex + 1) % tracks.length));
 
-bindInput(canvas, track01, TUNING.maxImpulse, {
+// Les deux circuits partagent les dimensions de grille : un seul binding suffit.
+bindInput(canvas, track, TUNING.maxImpulse, {
   getCarPos: () => sim.state.car.pos,
   canAim: () => sim.state.phase === 'idle',
   onAim: (impulse) => sim.aim(impulse),
@@ -99,12 +114,14 @@ bindInput(canvas, track01, TUNING.maxImpulse, {
 
 function frame(now: number): void {
   const before = sim.state.phase;
-  const { lapCompleted } = sim.update(now);
+  const { events } = sim.update(now);
 
-  if (lapCompleted) {
-    const lap = (now - lapStartMs) / 1000;
-    if (bestLap === undefined || lap < bestLap) bestLap = lap;
-    lapStartMs = now;
+  for (const ev of events) {
+    if (ev.type === 'lapComplete') {
+      const lap = (now - lapStartMs) / 1000;
+      if (bestLap === undefined || lap < bestLap) bestLap = lap;
+      lapStartMs = now;
+    }
   }
 
   // Le tour vient de se terminer : rafraîchir le HUD (et le bandeau si crash).
@@ -122,5 +139,6 @@ function frame(now: number): void {
   requestAnimationFrame(frame);
 }
 
+trackBtn.firstChild!.textContent = `Circuit : ${track.name} `;
 reset();
 requestAnimationFrame(frame);

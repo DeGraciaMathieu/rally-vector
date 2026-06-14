@@ -1,12 +1,13 @@
 // Rendu canvas 2D. Lit l'état et l'anim, dessine. NE DÉCIDE RIEN et NE MUTE RIEN :
 // le fantôme « prévu » est recalculé en LECTURE via domain/ (step/firstHit), jamais
-// écrit dans l'état. L'interpolation entre deux tours est purement cosmétique.
+// écrit dans l'état. L'interpolation entre deux tours est purement cosmétique. La
+// tilemap du Track est lue telle quelle (aucune logique de jeu ici).
 
 import { RaceState, Tuning } from '../domain/gameState';
 import { firstHit } from '../domain/collision';
 import { step } from '../domain/physics';
 import { Surface } from '../domain/surfaces';
-import { Track, isSolid, surfaceAt, trackHeight, trackWidth } from '../domain/track';
+import { Track, isSolid, surfaceAt, trackHeightPx, trackWidthPx } from '../domain/track';
 import { Vec2 } from '../domain/vec2';
 import { AnimView } from '../systems/simulation';
 
@@ -25,8 +26,8 @@ export class CanvasRenderer {
     private readonly tuning: Tuning,
   ) {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    this.W = trackWidth(track);
-    this.H = trackHeight(track);
+    this.W = trackWidthPx(track);
+    this.H = trackHeightPx(track);
     canvas.width = this.W * dpr;
     canvas.height = this.H * dpr;
     canvas.style.aspectRatio = `${this.W} / ${this.H}`;
@@ -46,7 +47,7 @@ export class CanvasRenderer {
 
   // --- tracé statique mis en cache offscreen, re-blitté chaque frame ---
   private buildCache(dpr: number): void {
-    const { TILE, COLS, ROWS, grid } = this.track;
+    const { tileSize, width, height, tiles, palette } = this.track;
     const cache = document.createElement('canvas');
     cache.width = this.W * dpr;
     cache.height = this.H * dpr;
@@ -54,13 +55,13 @@ export class CanvasRenderer {
     if (!g) throw new Error('Canvas 2D indisponible');
     g.scale(dpr, dpr);
 
-    for (let r = 0; r < ROWS; r++) {
-      for (let c = 0; c < COLS; c++) {
-        const s = grid[r * COLS + c];
-        const x = c * TILE;
-        const y = r * TILE;
+    for (let r = 0; r < height; r++) {
+      for (let c = 0; c < width; c++) {
+        const s = palette[tiles[r * width + c]];
+        const x = c * tileSize;
+        const y = r * tileSize;
         g.fillStyle = s.color;
-        g.fillRect(x, y, TILE, TILE);
+        g.fillRect(x, y, tileSize, tileSize);
         this.addTexture(g, s, x, y, c, r);
       }
     }
@@ -68,9 +69,10 @@ export class CanvasRenderer {
     // contour des tuiles roulables (lisibilité du tracé)
     g.strokeStyle = 'rgba(0,0,0,0.35)';
     g.lineWidth = 1;
-    for (let r = 0; r < ROWS; r++)
-      for (let c = 0; c < COLS; c++)
-        if (!grid[r * COLS + c].solid) g.strokeRect(c * TILE + 0.5, r * TILE + 0.5, TILE - 1, TILE - 1);
+    for (let r = 0; r < height; r++)
+      for (let c = 0; c < width; c++)
+        if (!palette[tiles[r * width + c]].solid)
+          g.strokeRect(c * tileSize + 0.5, r * tileSize + 0.5, tileSize - 1, tileSize - 1);
 
     this.cache = cache;
   }
@@ -83,7 +85,7 @@ export class CanvasRenderer {
     c: number,
     r: number,
   ): void {
-    const { TILE } = this.track;
+    const TILE = this.track.tileSize;
     // bruit déterministe léger -> texture, sans coût par frame
     const seed = (c * 73856093) ^ (r * 19349663);
     const rnd = (n: number): number => {
@@ -122,13 +124,17 @@ export class CanvasRenderer {
     g.restore();
   }
 
+  // Ligne d'arrivée façon damier le long du segment vertical finishLine.
   private drawFinish(g: CanvasRenderingContext2D): void {
-    const { TILE, finishX } = this.track;
-    const sq = TILE / 4;
-    for (const rr of [1, 2, 3]) {
+    const { tileSize, finishLine } = this.track;
+    const sq = tileSize / 4;
+    const x = finishLine.a.x;
+    const startRow = Math.round(Math.min(finishLine.a.y, finishLine.b.y) / tileSize);
+    const endRow = Math.round(Math.max(finishLine.a.y, finishLine.b.y) / tileSize);
+    for (let rr = startRow; rr < endRow; rr++) {
       for (let k = 0; k < 4; k++) {
         g.fillStyle = (k + rr) % 2 ? '#e7ecf3' : '#0b0e14';
-        g.fillRect(finishX - 6, rr * TILE + k * sq, 12, sq);
+        g.fillRect(x - 6, rr * tileSize + k * sq, 12, sq);
       }
     }
   }
