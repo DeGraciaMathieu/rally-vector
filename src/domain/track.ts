@@ -3,6 +3,7 @@
 // effet. La tilemap est une liste de Tile : un SOL (sous la voiture) + un OBSTACLE
 // optionnel (posé dessus). Les palettes (données) résolvent id -> Surface/Obstacle.
 
+import { ContactPolicy } from './collision';
 import { Segment } from './geometry';
 import { Obstacle, ObstacleId } from './obstacles';
 import { Surface, SurfaceId } from './surfaces';
@@ -79,4 +80,19 @@ export function isSolid(t: Track, x: number, y: number): boolean {
     if ((x - cx) ** 2 + (y - cy) ** 2 <= rad * rad) return true;
   }
   return false;
+}
+
+// Politique de contact de la cible solide en (x, y). L'obstacle solide prime sur
+// le sol ; défaut 'fatal' (préserve P2). À n'appeler que sur un point solide.
+export function contactAt(t: Track, x: number, y: number): ContactPolicy {
+  const at = tileAt(t, x, y);
+  if (!at) return t.palette[t.outOfBounds].contact ?? 'fatal';
+  const obs = at.tile.obstacle ? t.obstacles[at.tile.obstacle] : undefined;
+  if (obs && obs.solid && obs.radius > 0) {
+    const cx = (at.c + 0.5) * t.tileSize;
+    const cy = (at.r + 0.5) * t.tileSize;
+    const rad = obs.radius * t.tileSize;
+    if ((x - cx) ** 2 + (y - cy) ** 2 <= rad * rad) return obs.contact ?? 'fatal';
+  }
+  return t.palette[at.tile.surface].contact ?? 'fatal';
 }
