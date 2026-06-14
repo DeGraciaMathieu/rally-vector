@@ -34,6 +34,14 @@ export interface Tuning {
   readonly maxSpeed: number;
   readonly angleGripLoss: number;
   readonly anim: { readonly min: number; readonly max: number; readonly pxPerMs: number };
+  // Caméra (cosmétique, systems/render uniquement — hors déterminisme).
+  readonly camera: {
+    readonly viewport: { readonly width: number; readonly height: number };
+    readonly followZoom: number; // zoom en mode suivi
+    readonly smoothing: number; // facteur de lerp par frame vers la cible (0..1)
+    readonly lookAhead: number; // multiplicateur de l'impulsion pour anticiper
+    readonly deadZone: number; // impulsion en deçà (px) = pas d'anticipation
+  };
 }
 
 // Résultat déterministe d'un tour : où l'on arrive, à quelle vitesse, et si on tape.
