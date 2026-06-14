@@ -1,0 +1,288 @@
+// Rendu canvas 2D. Lit l'état et l'anim, dessine. NE DÉCIDE RIEN et NE MUTE RIEN :
+// le fantôme « prévu » est recalculé en LECTURE via domain/ (step/firstHit), jamais
+// écrit dans l'état. L'interpolation entre deux tours est purement cosmétique.
+
+import { RaceState, Tuning } from '../domain/gameState';
+import { firstHit } from '../domain/collision';
+import { step } from '../domain/physics';
+import { Surface } from '../domain/surfaces';
+import { Track, isSolid, surfaceAt, trackHeight, trackWidth } from '../domain/track';
+import { Vec2 } from '../domain/vec2';
+import { AnimView } from '../systems/simulation';
+
+const TAU = Math.PI * 2;
+
+export class CanvasRenderer {
+  private readonly ctx: CanvasRenderingContext2D;
+  private readonly W: number;
+  private readonly H: number;
+  private cache!: HTMLCanvasElement;
+  private readonly css: Record<string, string> = {};
+
+  constructor(
+    canvas: HTMLCanvasElement,
+    private readonly track: Track,
+    private readonly tuning: Tuning,
+  ) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.W = trackWidth(track);
+    this.H = trackHeight(track);
+    canvas.width = this.W * dpr;
+    canvas.height = this.H * dpr;
+    canvas.style.aspectRatio = `${this.W} / ${this.H}`;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas 2D indisponible');
+    this.ctx = ctx;
+    this.ctx.scale(dpr, dpr);
+    this.buildCache(dpr);
+  }
+
+  private getCss(v: string): string {
+    return (
+      this.css[v] ||
+      (this.css[v] = getComputedStyle(document.documentElement).getPropertyValue(v).trim())
+    );
+  }
+
+  // --- tracé statique mis en cache offscreen, re-blitté chaque frame ---
+  private buildCache(dpr: number): void {
+    const { TILE, COLS, ROWS, grid } = this.track;
+    const cache = document.createElement('canvas');
+    cache.width = this.W * dpr;
+    cache.height = this.H * dpr;
+    const g = cache.getContext('2d');
+    if (!g) throw new Error('Canvas 2D indisponible');
+    g.scale(dpr, dpr);
+
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const s = grid[r * COLS + c];
+        const x = c * TILE;
+        const y = r * TILE;
+        g.fillStyle = s.color;
+        g.fillRect(x, y, TILE, TILE);
+        this.addTexture(g, s, x, y, c, r);
+      }
+    }
+    this.drawFinish(g);
+    // contour des tuiles roulables (lisibilité du tracé)
+    g.strokeStyle = 'rgba(0,0,0,0.35)';
+    g.lineWidth = 1;
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++)
+        if (!grid[r * COLS + c].solid) g.strokeRect(c * TILE + 0.5, r * TILE + 0.5, TILE - 1, TILE - 1);
+
+    this.cache = cache;
+  }
+
+  private addTexture(
+    g: CanvasRenderingContext2D,
+    s: Surface,
+    x: number,
+    y: number,
+    c: number,
+    r: number,
+  ): void {
+    const { TILE } = this.track;
+    // bruit déterministe léger -> texture, sans coût par frame
+    const seed = (c * 73856093) ^ (r * 19349663);
+    const rnd = (n: number): number => {
+      const v = Math.sin(seed * 0.001 + n * 12.9898) * 43758.5453;
+      return v - Math.floor(v);
+    };
+    g.save();
+    if (s.id === 'ROAD') {
+      g.fillStyle = 'rgba(255,255,255,0.025)';
+      for (let i = 0; i < 6; i++) g.fillRect(x + rnd(i) * TILE, y + rnd(i + 9) * TILE, 2, 2);
+    } else if (s.id === 'DIRT') {
+      g.fillStyle = 'rgba(0,0,0,0.16)';
+      for (let i = 0; i < 10; i++) g.fillRect(x + rnd(i) * TILE, y + rnd(i + 3) * TILE, 3, 2);
+    } else if (s.id === 'GRAVEL') {
+      for (let i = 0; i < 14; i++) {
+        g.fillStyle = rnd(i) > 0.5 ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.22)';
+        g.fillRect(x + rnd(i + 1) * TILE, y + rnd(i + 5) * TILE, 2, 2);
+      }
+    } else if (s.id === 'WATER') {
+      g.fillStyle = 'rgba(255,255,255,0.10)';
+      g.fillRect(x + 3, y + TILE * 0.35, TILE - 6, 2);
+      g.fillRect(x + 6, y + TILE * 0.6, TILE - 14, 2);
+    } else if (s.id === 'WALL') {
+      g.fillStyle = 'rgba(255,255,255,0.02)';
+      g.fillRect(x, y, TILE, 1);
+    } else if (s.id === 'TREE') {
+      g.fillStyle = '#2c5a30';
+      g.beginPath();
+      g.arc(x + TILE / 2, y + TILE / 2, TILE * 0.42, 0, 7);
+      g.fill();
+      g.fillStyle = '#173318';
+      g.beginPath();
+      g.arc(x + TILE / 2, y + TILE / 2, TILE * 0.22, 0, 7);
+      g.fill();
+    }
+    g.restore();
+  }
+
+  private drawFinish(g: CanvasRenderingContext2D): void {
+    const { TILE, finishX } = this.track;
+    const sq = TILE / 4;
+    for (const rr of [1, 2, 3]) {
+      for (let k = 0; k < 4; k++) {
+        g.fillStyle = (k + rr) % 2 ? '#e7ecf3' : '#0b0e14';
+        g.fillRect(finishX - 6, rr * TILE + k * sq, 12, sq);
+      }
+    }
+  }
+
+  // ------------------------------- frame -------------------------------
+  draw(now: number, state: RaceState, anim: AnimView | null, showAid: boolean): void {
+    const ctx = this.ctx;
+    ctx.clearRect(0, 0, this.W, this.H);
+    ctx.drawImage(this.cache, 0, 0, this.W, this.H);
+
+    if (state.phase === 'animating' && anim) {
+      const t = Math.min(1, (now - anim.t0) / anim.dur);
+      const e = 1 - Math.pow(1 - t, 2); // easing out
+      const x = anim.from.x + (anim.to.x - anim.from.x) * e;
+      const y = anim.from.y + (anim.to.y - anim.from.y) * e;
+      this.drawCar(x, y, anim.heading);
+    } else {
+      if (state.phase === 'idle') this.drawAimAndGhost(state, showAid);
+      this.drawCar(state.car.pos.x, state.car.pos.y, state.car.heading);
+    }
+  }
+
+  private drawCar(x: number, y: number, ang: number): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(ang);
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.beginPath();
+    ctx.ellipse(0, 3, 11, 7, 0, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = '#ff5252';
+    this.roundRect(-10, -6, 20, 12, 3);
+    ctx.fill();
+    ctx.fillStyle = '#1b1f27';
+    this.roundRect(-3, -4, 7, 8, 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffd1d1';
+    ctx.beginPath();
+    ctx.moveTo(10, -4);
+    ctx.lineTo(14, 0);
+    ctx.lineTo(10, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  private drawAimAndGhost(state: RaceState, showAid: boolean): void {
+    const ctx = this.ctx;
+    const car = state.car.pos;
+    const impulse = state.impulse;
+
+    // anneau de poussée max
+    ctx.strokeStyle = 'rgba(255,179,0,0.18)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    ctx.arc(car.x, car.y, this.tuning.maxImpulse, 0, TAU);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // flèche d'impulsion (l'ordre du pilote)
+    if (impulse.x || impulse.y) {
+      this.arrow(car.x, car.y, car.x + impulse.x, car.y + impulse.y, this.getCss('--amber'));
+    }
+
+    if (!showAid) return;
+
+    const solid = (x: number, y: number): boolean => isSolid(this.track, x, y);
+
+    // trajectoire RÉELLE prévue (poussée + inertie) sur ce tour
+    const nv = step(state.car.vel, impulse, surfaceAt(this.track, car.x, car.y), this.tuning);
+    const np: Vec2 = { x: car.x + nv.x, y: car.y + nv.y };
+    const hit = firstHit(car.x, car.y, np.x, np.y, solid);
+    const end = hit ?? np;
+    const col = hit ? this.getCss('--danger') : this.getCss('--ghost');
+
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.moveTo(car.x, car.y);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.arc(end.x, end.y, hit ? 5 : 4, 0, TAU);
+    ctx.fill();
+    if (hit) {
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(end.x - 6, end.y - 6);
+      ctx.lineTo(end.x + 6, end.y + 6);
+      ctx.moveTo(end.x + 6, end.y - 6);
+      ctx.lineTo(end.x - 6, end.y + 6);
+      ctx.stroke();
+    }
+
+    // continuation en roue libre (inertie sur 2 tours) — seulement si pas de crash
+    if (!hit) {
+      let p: Vec2 = np;
+      let v: Vec2 = nv;
+      let faded = false;
+      ctx.setLineDash([2, 5]);
+      for (let i = 0; i < 2 && !faded; i++) {
+        const v2 = step(v, { x: 0, y: 0 }, surfaceAt(this.track, p.x, p.y), this.tuning);
+        const p2: Vec2 = { x: p.x + v2.x, y: p.y + v2.y };
+        const h2 = firstHit(p.x, p.y, p2.x, p2.y, solid);
+        const e2 = h2 ?? p2;
+        ctx.strokeStyle = 'rgba(74,222,128,' + (0.3 - i * 0.1) + ')';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(e2.x, e2.y);
+        ctx.stroke();
+        if (h2) faded = true;
+        p = p2;
+        v = v2;
+      }
+      ctx.setLineDash([]);
+    }
+  }
+
+  // ----- helpers de dessin -----
+  private roundRect(x: number, y: number, w: number, h: number, r: number): void {
+    const ctx = this.ctx;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  private arrow(x0: number, y0: number, x1: number, y1: number, solid: string): void {
+    const ctx = this.ctx;
+    ctx.strokeStyle = solid;
+    ctx.fillStyle = solid;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+    const a = Math.atan2(y1 - y0, x1 - x0);
+    const h = 7;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x1 - h * Math.cos(a - 0.4), y1 - h * Math.sin(a - 0.4));
+    ctx.lineTo(x1 - h * Math.cos(a + 0.4), y1 - h * Math.sin(a + 0.4));
+    ctx.closePath();
+    ctx.fill();
+  }
+}
