@@ -2,13 +2,22 @@
 // rAF et les chronos wall-clock (hors domain/, donc hors déterminisme). Aucune
 // règle de jeu ici : tout vient de la simulation et du LapTracker.
 
-import { surfaceAt } from './domain/track';
+import { surfaceAt, trackHeightPx, trackWidthPx } from './domain/track';
 import { length } from './domain/vec2';
 import { tracks } from './data/tracks';
 import { TUNING } from './data/tuning';
 import { CanvasRenderer } from './render/canvasRenderer';
+import {
+  Bounds,
+  Camera,
+  clampCamera,
+  fitCamera,
+  follow,
+  followTarget,
+  screenToWorld,
+} from './systems/camera';
 import { bindInput } from './systems/input';
-import { Simulation } from './systems/simulation';
+import { Simulation, animPos } from './systems/simulation';
 
 // Seed de gameplay : injecté dans l'état (préparation P5), pas encore consommé.
 const SEED = 1;
@@ -21,12 +30,34 @@ const el = (id: string): HTMLElement => {
 
 const canvas = el('game') as HTMLCanvasElement;
 
+const VIEWPORT = TUNING.camera.viewport;
+
 let trackIndex = 0;
 let track = tracks[trackIndex];
 let sim = new Simulation(track, TUNING, SEED);
 let renderer = new CanvasRenderer(canvas, track, TUNING);
 
 let showAid = true;
+
+// Caméra cosmétique (jamais dans l'état). Bornes dérivées de la taille du circuit.
+let bounds: Bounds = makeBounds();
+let camera: Camera = centeredCamera();
+let circuitView = false;
+
+function makeBounds(): Bounds {
+  return { width: trackWidthPx(track), height: trackHeightPx(track) };
+}
+
+function centeredCamera(): Camera {
+  const { pos } = track.start;
+  return clampCamera({ x: pos.x, y: pos.y, zoom: TUNING.camera.followZoom }, VIEWPORT, bounds);
+}
+
+// Point suivi : la voiture (interpolée pendant l'animation, statique sinon).
+function focusPoint(now: number): { x: number; y: number } {
+  if (sim.state.phase === 'animating' && sim.anim) return animPos(sim.anim, now);
+  return sim.state.car.pos;
+}
 
 // Chronos wall-clock — orchestration temporelle (systems), jamais dans l'état.
 let raceStartMs: number | null = null;
@@ -62,6 +93,7 @@ function reset(): void {
   raceStartMs = null;
   lapStartMs = 0;
   bestLap = undefined;
+  camera = centeredCamera();
   banner.classList.remove('show');
   updateHud();
 }
@@ -71,6 +103,7 @@ function loadTrack(index: number): void {
   track = tracks[trackIndex];
   sim = new Simulation(track, TUNING, SEED);
   renderer = new CanvasRenderer(canvas, track, TUNING);
+  bounds = makeBounds();
   trackBtn.firstChild!.textContent = `Circuit : ${track.name} `;
   reset();
 }
@@ -91,6 +124,10 @@ function toggleAid(): void {
   if (aidBtn.firstChild) aidBtn.firstChild.textContent = `Aide à la visée : ${showAid ? 'ON' : 'OFF'} `;
 }
 
+function toggleView(): void {
+  circuitView = !circuitView;
+}
+
 function showBanner(): void {
   updateHud();
   banner.classList.add('show');
@@ -102,14 +139,15 @@ el('banner-restart').addEventListener('click', reset);
 aidBtn.addEventListener('click', toggleAid);
 trackBtn.addEventListener('click', () => loadTrack((trackIndex + 1) % tracks.length));
 
-// Les deux circuits partagent les dimensions de grille : un seul binding suffit.
-bindInput(canvas, track, TUNING.maxImpulse, {
+bindInput(canvas, VIEWPORT, TUNING.maxImpulse, {
   getCarPos: () => sim.state.car.pos,
   canAim: () => sim.state.phase === 'idle',
+  screenToWorld: (screen) => screenToWorld(camera, VIEWPORT, screen),
   onAim: (impulse) => sim.aim(impulse),
   onCommit: commit,
   onReset: reset,
   onToggleAid: toggleAid,
+  onToggleView: toggleView,
 });
 
 function frame(now: number): void {
@@ -130,7 +168,15 @@ function frame(now: number): void {
     updateHud();
   }
 
-  renderer.draw(now, sim.state, sim.anim, showAid);
+  if (circuitView) {
+    camera = fitCamera(VIEWPORT, bounds);
+  } else {
+    const { lookAhead, deadZone, smoothing } = TUNING.camera;
+    const target = followTarget(focusPoint(now), sim.state.impulse, lookAhead, deadZone);
+    camera = follow({ ...camera, zoom: TUNING.camera.followZoom }, target, VIEWPORT, bounds, smoothing);
+  }
+
+  renderer.draw(now, sim.state, sim.anim, showAid, camera);
 
   if (raceStartMs !== null && sim.state.phase !== 'crashed') {
     hud.time.textContent = ((now - raceStartMs) / 1000).toFixed(1) + 's';
