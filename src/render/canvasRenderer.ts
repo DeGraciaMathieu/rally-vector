@@ -13,6 +13,7 @@ import { Vec2 } from '../domain/vec2';
 import { AnimView, animEase, animPos } from '../systems/simulation';
 import { Camera } from '../systems/camera';
 import { GhostFrame } from '../systems/ghost';
+import { Effects } from './effects';
 
 const TAU = Math.PI * 2;
 
@@ -25,6 +26,11 @@ export class CanvasRenderer {
   private readonly worldH: number;
   private cache!: HTMLCanvasElement;
   private readonly css: Record<string, string> = {};
+  // Game feel (cosmétique) : effets + suivi inter-frame pour traces et secousse.
+  private readonly fx = new Effects();
+  private prevCar: Vec2 | null = null;
+  private lastSpeed = 0;
+  private prevPhase: RaceState['phase'] = 'idle';
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -191,13 +197,22 @@ export class CanvasRenderer {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.vw, this.vh);
 
-    // Transformée caméra : tout est ensuite dessiné en coordonnées MONDE.
+    // Secousse d'impact : déclenchée à la transition vers 'crashed' (cosmétique).
+    if (this.prevPhase === 'animating' && state.phase === 'crashed') {
+      this.fx.crashShake(now, this.lastSpeed, car.maxSpeed);
+    }
+    this.prevPhase = state.phase;
+    this.fx.update(now);
+    const shake = this.fx.shakeOffset(now);
+
+    // Transformée caméra (+ secousse) : tout est ensuite dessiné en coordonnées MONDE.
     ctx.save();
-    ctx.translate(this.vw / 2, this.vh / 2);
+    ctx.translate(this.vw / 2 + shake.x, this.vh / 2 + shake.y);
     ctx.scale(camera.zoom, camera.zoom);
     ctx.translate(-camera.x, -camera.y);
 
     this.blitVisible(camera);
+    this.fx.drawTraces(ctx, now); // traces de pneus sur le sol
 
     // Fantôme sous la voiture : synchronisé au même index de tour, interpolé par la
     // même progression d'animation que le joueur.
@@ -208,13 +223,46 @@ export class CanvasRenderer {
 
     if (state.phase === 'animating' && anim) {
       const p = animPos(anim, now);
+      // Dépose traces + particules le long du déplacement réel (depuis flags AnimView).
+      const from = this.prevCar ?? p;
+      this.fx.trail(now, from.x, from.y, p.x, p.y, anim.skid, surfaceAt(this.track, p.x, p.y), anim.speed);
+      this.prevCar = p;
+      this.lastSpeed = anim.speed;
+      this.drawSpeedTrail(p.x, p.y, anim.heading, anim.speed, car);
       this.drawCar(p.x, p.y, anim.heading, car.livery);
     } else {
+      this.prevCar = null;
       if (state.phase === 'idle') this.drawAimAndGhost(state, showAid, car);
       this.drawCar(state.car.pos.x, state.car.pos.y, state.car.heading, car.livery);
     }
 
+    this.fx.drawParticles(ctx, now); // poussière/gravier/gerbe au-dessus
+
     ctx.restore();
+  }
+
+  // Efface les effets persistants (traces, particules) — appelé au restart.
+  clearEffects(): void {
+    this.fx.clear();
+    this.prevCar = null;
+    this.lastSpeed = 0;
+  }
+
+  // Traînée de vitesse : copies fantômes derrière la voiture, d'autant plus longues
+  // que la vitesse est haute (game feel, cosmétique).
+  private drawSpeedTrail(x: number, y: number, ang: number, speed: number, car: Car): void {
+    const t = Math.min(1, speed / car.maxSpeed);
+    if (t < 0.3) return;
+    const ctx = this.ctx;
+    const back = Math.cos(ang);
+    const backY = Math.sin(ang);
+    for (let i = 1; i <= 2; i++) {
+      const d = i * 6 * t;
+      ctx.save();
+      ctx.globalAlpha = 0.18 * t * (1 - (i - 1) * 0.4);
+      this.drawCar(x - back * d, y - backY * d, ang, car.livery);
+      ctx.restore();
+    }
   }
 
   // Voiture fantôme translucide à l'index de tour courant, interpolée vers le tour
