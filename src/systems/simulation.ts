@@ -15,6 +15,7 @@ import {
   resolveMove,
   setImpulse,
 } from '../domain/gameState';
+import { Car } from '../domain/car';
 import { ContactKind } from '../domain/collision';
 import { createRng } from '../domain/rng';
 import { Track, contactAt, isSolid, surfaceAt } from '../domain/track';
@@ -49,6 +50,7 @@ export function advanceTurn(
   state: RaceState,
   track: Track,
   tuning: Tuning,
+  car: Car,
   impulse: Vec2,
   strict = true,
 ): RaceState {
@@ -58,6 +60,7 @@ export function advanceTurn(
     aimed,
     surf,
     tuning,
+    car,
     (x, y) => isSolid(track, x, y),
     (x, y) => contactAt(track, x, y),
     strict,
@@ -74,22 +77,30 @@ export class Simulation {
   private _state: RaceState;
   private _anim: Anim | null = null;
   private _strict: boolean;
+  private _car: Car;
   private readonly laps: LapTracker;
 
   constructor(
     private readonly track: Track,
     private readonly tuning: Tuning,
+    car: Car,
     private seed: number,
     strict = true,
   ) {
     this._state = createRaceState(createRng(seed), track.start);
     this._strict = strict;
+    this._car = car;
     this.laps = new LapTracker(track);
   }
 
   // Mode strict : crash = fin systématique (préserve la version d'origine).
   setStrict(strict: boolean): void {
     this._strict = strict;
+  }
+
+  // Voiture sélectionnée (caractéristiques lues par la physique).
+  setCar(car: Car): void {
+    this._car = car;
   }
 
   get state(): RaceState {
@@ -121,6 +132,7 @@ export class Simulation {
       this._state,
       surf,
       this.tuning,
+      this._car,
       (x, y) => isSolid(this.track, x, y),
       (x, y) => contactAt(this.track, x, y),
       this._strict,

@@ -12,6 +12,7 @@ export const aimToImpulse = (carPos: Vec2, point: Vec2, maxImpulse: number): Vec
 
 export interface InputCallbacks {
   getCarPos: () => Vec2;
+  getMaxImpulse: () => number; // borne d'impulsion de la voiture courante
   canAim: () => boolean; // vrai seulement à l'arrêt
   screenToWorld: (screen: Vec2) => Vec2; // mappe le point écran (viewport) en monde
   onAim: (impulse: Vec2) => void;
@@ -24,7 +25,6 @@ export interface InputCallbacks {
 export function bindInput(
   canvas: HTMLCanvasElement,
   viewport: Viewport,
-  maxImpulse: number,
   cb: InputCallbacks,
 ): void {
   // Point client -> coordonnées viewport (px logiques) -> monde (via caméra).
@@ -37,7 +37,7 @@ export function bindInput(
     return cb.screenToWorld(screen);
   };
   const aim = (ev: PointerEvent): void =>
-    cb.onAim(aimToImpulse(cb.getCarPos(), toWorld(ev), maxImpulse));
+    cb.onAim(aimToImpulse(cb.getCarPos(), toWorld(ev), cb.getMaxImpulse()));
 
   let pointing = false;
   canvas.addEventListener('pointerdown', (e) => {
