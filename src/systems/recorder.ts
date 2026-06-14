@@ -11,7 +11,7 @@ export interface Recording {
   readonly carId: string;
   readonly trackId: string;
   readonly strict: boolean; // mode crash = fin au moment de l'enregistrement
-  readonly lapMs: number; // meilleur temps au tour atteint par cette course
+  readonly timeMs: number; // temps de référence (meilleur tour en boucle, ou temps d'étape)
   readonly impulses: readonly Vec2[]; // séquence depuis le départ
 }
 
@@ -21,7 +21,7 @@ export interface RecordingMeta {
   readonly carId: string;
   readonly trackId: string;
   readonly strict: boolean;
-  readonly lapMs: number;
+  readonly timeMs: number;
 }
 
 export class Recorder {

@@ -8,7 +8,7 @@ import { RaceState, Tuning, createRaceState } from '../domain/gameState';
 import { createRng } from '../domain/rng';
 import { Vec2 } from '../domain/vec2';
 import { carById } from '../data/cars';
-import { trackById } from '../data/tracks';
+import { resolveTrack } from '../data/tracks';
 import { Recording } from './recorder';
 import { advanceTurn } from './simulation';
 
@@ -26,7 +26,7 @@ export function buildGhost(
   simVersion: number,
 ): GhostFrame[] | null {
   if (!rec || rec.simVersion !== simVersion) return null;
-  const track = trackById(rec.trackId);
+  const track = resolveTrack(rec.trackId);
   const car = carById(rec.carId);
   let state: RaceState = createRaceState(createRng(rec.seed), track.start);
   const frames: GhostFrame[] = [{ pos: state.car.pos, heading: state.car.heading }];
