@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rallye Vecteur — proto</title>
+<style>
+  :root {
+    --bg:        #0b0e14;
+    --panel:     #11161f;
+    --line:      #1d2531;
+    --ink:       #e7ecf3;
+    --ink-dim:   #7b8696;
+    --amber:     #ffb300;  /* impulsion / accent co-pilote */
+    --ghost:     #4ade80;  /* trajectoire prevue OK */
+    --danger:    #ff4d4d;  /* trajectoire = mur */
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  .wrap {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 18px 16px 40px;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 12px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 10px; margin-bottom: 14px;
+  }
+  header h1 {
+    font-family: "Arial Narrow", "Helvetica Neue", system-ui, sans-serif;
+    font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+    font-size: 22px; margin: 0;
+  }
+  header .tag {
+    color: var(--amber); font-size: 11px; letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+  .stage {
+    position: relative;
+    border: 1px solid var(--line);
+    background: #05070b;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  canvas { display: block; width: 100%; height: auto; touch-action: none; }
+
+  /* HUD overlay */
+  .hud {
+    position: absolute; inset: 0; pointer-events: none;
+    display: flex; justify-content: space-between; padding: 10px;
+  }
+  .hud .col { display: flex; flex-direction: column; gap: 6px; }
+  .hud .col.right { align-items: flex-end; }
+  .chip {
+    background: rgba(10,13,20,0.74);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px; line-height: 1.3;
+    backdrop-filter: blur(2px);
+  }
+  .chip b { color: var(--amber); font-weight: 700; }
+  .chip .k { color: var(--ink-dim); }
+
+  .surf-dot { display:inline-block; width:9px; height:9px; border-radius:2px; vertical-align:middle; margin-right:5px; }
+
+  /* Bandeau message (crash) */
+  .banner {
+    position:absolute; inset:0; display:none;
+    align-items:center; justify-content:center; flex-direction:column; gap:14px;
+    background: rgba(5,7,11,0.78); text-align:center; padding: 20px;
+  }
+  .banner.show { display:flex; }
+  .banner h2 {
+    font-family:"Arial Narrow", system-ui, sans-serif; font-weight:800;
+    letter-spacing:0.08em; text-transform:uppercase; margin:0; font-size:30px;
+    color: var(--danger);
+  }
+  .banner p { margin:0; color:var(--ink-dim); font-size:13px; max-width:340px; }
+
+  .controls {
+    display:flex; flex-wrap:wrap; gap:10px; align-items:center;
+    margin-top:14px;
+  }
+  button {
+    font-family: inherit; font-size: 13px;
+    background: var(--panel); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 5px;
+    padding: 9px 14px; cursor: pointer; letter-spacing:0.03em;
+    transition: border-color .12s, background .12s;
+  }
+  button:hover { border-color: var(--amber); }
+  button:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  button.primary { background: var(--amber); color:#0b0e14; border-color: var(--amber); font-weight:700; }
+  button.primary:hover { filter: brightness(1.08); }
+  button[aria-pressed="true"] { border-color: var(--amber); color: var(--amber); }
+  .hint { color: var(--ink-dim); font-size: 12px; margin-top:12px; line-height:1.5; }
+  kbd {
+    font-family: inherit; font-size: 11px; background:#000; color:var(--ink);
+    border:1px solid var(--line); border-bottom-width:2px; border-radius:3px;
+    padding: 1px 5px;
+  }
+  .legend { display:flex; flex-wrap:wrap; gap:14px; margin-top:14px; font-size:12px; color:var(--ink-dim); }
+  .legend span { display:flex; align-items:center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Rallye Vecteur</h1>
+    <span class="tag">proto · impulsion &amp; inertie</span>
+  </header>
+
+  <div class="stage">
+    <canvas id="game"></canvas>
+    <div class="hud">
+      <div class="col">
+        <div class="chip"><span class="k">tour</span> <b id="hud-turn">0</b> · <span class="k">boucle</span> <b id="hud-lap">0</b></div>
+        <div class="chip"><span class="k">temps</span> <b id="hud-time">0.0s</b> · <span class="k">best</span> <b id="hud-best">—</b></div>
+      </div>
+      <div class="col right">
+        <div class="chip"><span class="k">vitesse</span> <b id="hud-speed">0</b></div>
+        <div class="chip"><span id="hud-surf-dot" class="surf-dot"></span><b id="hud-surf">route</b></div>
+      </div>
+    </div>
+    <div class="banner" id="banner">
+      <h2 id="banner-title">Sortie de route</h2>
+      <p id="banner-text">La voiture a tapé. En rallye, on ne pardonne pas — la course est terminée.</p>
+      <button class="primary" id="banner-restart">Reprendre la spéciale (R)</button>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="primary" id="btn-go">Valider le déplacement <kbd>Espace</kbd></button>
+    <button id="btn-aid" aria-pressed="true">Aide à la visée : ON <kbd>A</kbd></button>
+    <button id="btn-restart">Recommencer <kbd>R</kbd></button>
+  </div>
+
+  <p class="hint">
+    Tire une flèche depuis la voiture (souris ou doigt) pour donner une <b style="color:var(--amber)">impulsion</b> :
+    sa longueur = la poussée, sa direction = là où tu veux aller. La flèche n'est pas le déplacement —
+    l'<b style="color:var(--ghost)">inertie</b> se combine à ta poussée. La trajectoire verte montre où tu finiras
+    vraiment ; si elle vire au rouge, tu pars dans le mur. Puis <b>Valider</b>.
+  </p>
+
+  <div class="legend">
+    <span><span class="surf-dot" style="background:#3c424e"></span>Route — adhérence haute</span>
+    <span><span class="surf-dot" style="background:#8a5a33"></span>Terre — ça décroche</span>
+    <span><span class="surf-dot" style="background:#9aa0a8"></span>Gravier — très glissant</span>
+    <span><span class="surf-dot" style="background:#2f6f8f"></span>Flaque — aucune accroche</span>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* =========================================================================
+   RALLYE VECTEUR — prototype
+   Architecture volontairement en couches pour rester extensible :
+     TUNING      -> tous les réglages "feeling" au même endroit
+     SURFACES    -> table des types de sol (grip / drag / solide / rendu)
+                    + obstacles futurs (flaque, arbre) déjà prêts ici
+     Track       -> grille de tuiles, lookup de surface, rendu (caché offscreen)
+     Physics     -> fonctions pures : pas d'impulsion, détection de collision
+     Game        -> état, animation, entrées, HUD
+   ========================================================================= */
+
+/* ----------------------------- TUNING ---------------------------------- */
+const TUNING = {
+  TILE: 36,
+  COLS: 24,
+  ROWS: 16,
+  maxImpulse: 26,        // poussée max par tour (longueur de la flèche)
+  maxSpeed: 150,         // garde-fou : vitesse plafonnée
+  // grip  : autorité de la flèche sur la trajectoire (0 = aucune, 1 = kart)
+  // drag  : décélération multiplicative par tour (frein moteur + surface)
+  // grip et drag sont lus sous la voiture, pas à l'arrivée -> ils "tirent" dans le virage
+  angleGripLoss: 0.45,   // perte d'adhérence quand on braque fort à grande vitesse
+  anim: { min: 180, max: 480, pxPerMs: 0.34 }, // durée d'animation du déplacement
+};
+
+/* ----------------------------- SURFACES -------------------------------- */
+// Chaque sol est une donnée, pas du code en dur : ajouter un obstacle = une ligne.
+const S = {
+  WALL:   { id:'WALL',   label:'mur',     solid:true,  grip:0,    drag:0,    color:'#161b24', dot:'#161b24' },
+  ROAD:   { id:'ROAD',   label:'route',   solid:false, grip:0.92, drag:0.22, color:'#3c424e', dot:'#3c424e' },
+  DIRT:   { id:'DIRT',   label:'terre',   solid:false, grip:0.60, drag:0.30, color:'#8a5a33', dot:'#8a5a33' },
+  GRAVEL: { id:'GRAVEL', label:'gravier', solid:false, grip:0.40, drag:0.38, color:'#9aa0a8', dot:'#9aa0a8' },
+
+  // --- Obstacles "un jour" : déjà fonctionnels, il suffit de les poser sur la grille ---
+  WATER:  { id:'WATER',  label:'flaque',  solid:false, grip:0.18, drag:0.30, color:'#2f6f8f', dot:'#2f6f8f' },
+  TREE:   { id:'TREE',   label:'arbre',   solid:true,  grip:0,    drag:0,    color:'#1f3d22', dot:'#1f3d22' },
+};
+
+/* ------------------------------ TRACK ---------------------------------- */
+const Track = (() => {
+  const { COLS, ROWS, TILE } = TUNING;
+  const grid = new Array(COLS * ROWS);
+  const idx = (c, r) => r * COLS + c;
+
+  const inRing = (c, r) => {
+    const topBot   = (r >= 1 && r <= 3) || (r >= 12 && r <= 14);
+    const leftRite = (c >= 1 && c <= 3) || (c >= 20 && c <= 22);
+    const bandH = topBot && c >= 1 && c <= 22;
+    const bandV = leftRite && r >= 1 && r <= 14;
+    return bandH || bandV;
+  };
+
+  // 1) base : anneau roulable = ROUTE, le reste = MUR
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      grid[idx(c, r)] = inRing(c, r) ? S.ROAD : S.WALL;
+
+  // 2) on peint des zones de surface (rectangles)
+  const paint = (c0, r0, c1, r1, surf) => {
+    for (let r = r0; r <= r1; r++)
+      for (let c = c0; c <= c1; c++)
+        if (inRing(c, r)) grid[idx(c, r)] = surf;
+  };
+  paint(6, 12, 17, 14, S.DIRT);    // ligne droite du bas = terre
+  paint(17, 1, 22, 3, S.GRAVEL);   // corde du virage rapide haut-droite = gravier
+  paint(1, 12, 5, 14, S.GRAVEL);   // sortie du virage bas-gauche = gravier
+  paint(11, 13, 12, 14, S.WATER);  // flaque posée sur la terre (démo obstacle)
+
+  // start : sur la ligne droite du haut, on roulera dans le sens horaire (vers la droite)
+  const start = { c: 6, r: 2 };
+  const startPos = { x: (start.c + 0.5) * TILE, y: (start.r + 0.5) * TILE };
+  // ligne d'arrivée (verticale) à gauche du départ : on la franchira après un tour complet
+  const finishX = 4 * TILE;
+  // checkpoint (bas) à valider avant qu'une boucle compte
+  const checkpoint = { x0: 9 * TILE, y0: 12 * TILE, x1: 15 * TILE, y1: 15 * TILE };
+
+  const surfaceAt = (x, y) => {
+    const c = Math.floor(x / TILE), r = Math.floor(y / TILE);
+    if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return S.WALL;
+    return grid[idx(c, r)];
+  };
+  const isSolid = (x, y) => surfaceAt(x, y).solid;
+
+  // --- rendu statique mis en cache (offscreen), re-blitté chaque frame ---
+  let cache = null;
+  function buildCache(dpr) {
+    const W = COLS * TILE, H = ROWS * TILE;
+    cache = document.createElement('canvas');
+    cache.width = W * dpr; cache.height = H * dpr;
+    const g = cache.getContext('2d');
+    g.scale(dpr, dpr);
+
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const s = grid[idx(c, r)];
+        const x = c * TILE, y = r * TILE;
+        g.fillStyle = s.color;
+        g.fillRect(x, y, TILE, TILE);
+        addTexture(g, s, x, y, c, r);
+      }
+    }
+    // ligne d'arrivée façon damier
+    drawFinish(g);
+    // contour des tuiles solides (lisibilité du tracé)
+    g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 1;
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++)
+        if (!grid[idx(c, r)].solid) g.strokeRect(c*TILE+0.5, r*TILE+0.5, TILE-1, TILE-1);
+  }
+
+  function addTexture(g, s, x, y, c, r) {
+    // bruit déterministe léger -> texture 16-bit, sans coût par frame
+    const seed = (c * 73856093) ^ (r * 19349663);
+    const rnd = (n) => { const v = Math.sin(seed * 0.001 + n * 12.9898) * 43758.5453; return v - Math.floor(v); };
+    g.save();
+    if (s === S.ROAD) {
+      g.fillStyle = 'rgba(255,255,255,0.025)';
+      for (let i=0;i<6;i++) g.fillRect(x+rnd(i)*TILE, y+rnd(i+9)*TILE, 2, 2);
+    } else if (s === S.DIRT) {
+      g.fillStyle = 'rgba(0,0,0,0.16)';
+      for (let i=0;i<10;i++) g.fillRect(x+rnd(i)*TILE, y+rnd(i+3)*TILE, 3, 2);
+    } else if (s === S.GRAVEL) {
+      for (let i=0;i<14;i++){ g.fillStyle = rnd(i)>0.5?'rgba(255,255,255,0.18)':'rgba(0,0,0,0.22)';
+        g.fillRect(x+rnd(i+1)*TILE, y+rnd(i+5)*TILE, 2, 2); }
+    } else if (s === S.WATER) {
+      g.fillStyle='rgba(255,255,255,0.10)';
+      g.fillRect(x+3, y+TILE*0.35, TILE-6, 2);
+      g.fillRect(x+6, y+TILE*0.6, TILE-14, 2);
+    } else if (s === S.WALL) {
+      g.fillStyle='rgba(255,255,255,0.02)'; g.fillRect(x, y, TILE, 1);
+    } else if (s === S.TREE) {
+      g.fillStyle='#2c5a30'; g.beginPath(); g.arc(x+TILE/2,y+TILE/2,TILE*0.42,0,7); g.fill();
+      g.fillStyle='#173318'; g.beginPath(); g.arc(x+TILE/2,y+TILE/2,TILE*0.22,0,7); g.fill();
+    }
+    g.restore();
+  }
+
+  function drawFinish(g) {
+    const sq = TILE / 4, cells = [1,2,3];
+    for (const rr of cells) {
+      for (let k=0;k<4;k++){
+        g.fillStyle = (k+rr)%2 ? '#e7ecf3' : '#0b0e14';
+        g.fillRect(finishX - 6, rr*TILE + k*sq, 12, sq);
+      }
+    }
+  }
+
+  return {
+    grid, surfaceAt, isSolid, buildCache,
+    get cache(){ return cache; },
+    startPos, finishX, checkpoint,
+    W: COLS*TILE, H: ROWS*TILE,
+  };
+})();
+
+/* ------------------------------ PHYSICS -------------------------------- */
+const Physics = {
+  // Modèle cœur : v' = (v + impulsion·gripEff)·(1 - drag), puis pos += v'
+  // gripEff chute quand on braque fort à grande vitesse -> sensation de glisse rallye.
+  step(vel, impulse, surf) {
+    const speed = Math.hypot(vel.x, vel.y);
+    let grip = surf.grip;
+    if (speed > 1 && (impulse.x || impulse.y)) {
+      const imag = Math.hypot(impulse.x, impulse.y) || 1;
+      const dot = (vel.x*impulse.x + vel.y*impulse.y) / (speed*imag); // cos de l'écart d'angle
+      const turn = (1 - dot) / 2;            // 0 (tout droit) -> 1 (demi-tour)
+      const speedFac = Math.min(speed / TUNING.maxSpeed, 1);
+      grip *= 1 - TUNING.angleGripLoss * turn * speedFac;
+    }
+    let vx = (vel.x + impulse.x * grip) * (1 - surf.drag);
+    let vy = (vel.y + impulse.y * grip) * (1 - surf.drag);
+    const sp = Math.hypot(vx, vy);
+    if (sp > TUNING.maxSpeed) { const k = TUNING.maxSpeed / sp; vx*=k; vy*=k; }
+    return { x: vx, y: vy };
+  },
+
+  // 1er point solide rencontré le long d'un segment (mur OU arbre). null sinon.
+  firstHit(x0, y0, x1, y1) {
+    const dx = x1-x0, dy = y1-y0;
+    const dist = Math.hypot(dx, dy);
+    const steps = Math.max(1, Math.ceil(dist / 4));
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      const x = x0 + dx*t, y = y0 + dy*t;
+      if (Track.isSolid(x, y)) return { x, y, t };
+    }
+    return null;
+  },
+};
+
+/* ------------------------------- GAME ---------------------------------- */
+const Game = (() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  canvas.width  = Track.W * dpr;
+  canvas.height = Track.H * dpr;
+  canvas.style.aspectRatio = `${Track.W} / ${Track.H}`;
+  ctx.scale(dpr, dpr);
+  Track.buildCache(dpr);
+
+  // HUD refs
+  const el = (id)=>document.getElementById(id);
+  const hud = {
+    turn: el('hud-turn'), lap: el('hud-lap'), time: el('hud-time'), best: el('hud-best'),
+    speed: el('hud-speed'), surf: el('hud-surf'), surfDot: el('hud-surf-dot'),
+  };
+  const banner = el('banner');
+
+  let state;            // 'idle' | 'animating' | 'crashed'
+  let car;              // { x, y }
+  let vel;              // { x, y }
+  let heading;          // angle de la voiture (rad)
+  let impulse;          // { x, y } visée courante
+  let showAid = true;
+  let turns, laps, bestLap, lapStartMs, raceStartMs, armed;
+  let anim = null;      // animation de déplacement en cours
+
+  function reset() {
+    car = { ...Track.startPos };
+    vel = { x: 0, y: 0 };
+    heading = 0;                 // regarde vers la droite
+    impulse = { x: 0, y: 0 };
+    turns = 0; laps = 0;
+    armed = false;
+    raceStartMs = lapStartMs = null;
+    state = 'idle';
+    anim = null;
+    banner.classList.remove('show');
+    updateHud();
+  }
+
+  /* ----- entrées : viser à la souris/doigt ----- */
+  function pointerToWorld(ev) {
+    const r = canvas.getBoundingClientRect();
+    const x = (ev.clientX - r.left) / r.width  * Track.W;
+    const y = (ev.clientY - r.top ) / r.height * Track.H;
+    return { x, y };
+  }
+  function aimAt(p) {
+    let ix = p.x - car.x, iy = p.y - car.y;
+    const m = Math.hypot(ix, iy);
+    if (m > TUNING.maxImpulse) { const k = TUNING.maxImpulse / m; ix*=k; iy*=k; }
+    impulse = { x: ix, y: iy };
+  }
+  let pointing = false;
+  canvas.addEventListener('pointerdown', (e)=>{
+    if (state !== 'idle') return;
+    pointing = true; canvas.setPointerCapture(e.pointerId); aimAt(pointerToWorld(e));
+  });
+  canvas.addEventListener('pointermove', (e)=>{ if (pointing) aimAt(pointerToWorld(e)); });
+  canvas.addEventListener('pointerup',   ()=>{ pointing = false; });
+  canvas.addEventListener('pointercancel',()=>{ pointing = false; });
+
+  /* ----- valider un déplacement ----- */
+  function commit() {
+    if (state !== 'idle') return;
+    if (raceStartMs === null) { raceStartMs = lapStartMs = performance.now(); }
+
+    const newVel = Physics.step(vel, impulse, Track.surfaceAt(car.x, car.y));
+    const target = { x: car.x + newVel.x, y: car.y + newVel.y };
+    const hit = Physics.firstHit(car.x, car.y, target.x, target.y);
+
+    const from = { ...car };
+    const to = hit ? { x: hit.x, y: hit.y } : target;
+    const dist = Math.hypot(to.x-from.x, to.y-from.y);
+    const dur = Math.min(TUNING.anim.max, Math.max(TUNING.anim.min, dist / TUNING.anim.pxPerMs));
+
+    if (dist > 0.5) heading = Math.atan2(to.y-from.y, to.x-from.x);
+
+    state = 'animating';
+    anim = { from, to, dur, t0: performance.now(), crash: !!hit, newVel };
+  }
+
+  function finishMove() {
+    car = { ...anim.to };
+    if (anim.crash) {
+      vel = { x:0, y:0 };
+      state = 'crashed';
+      showBanner();
+      anim = null;
+      return;
+    }
+    vel = anim.newVel;
+    turns++;
+    detectLap(anim.from, anim.to);
+    impulse = { x:0, y:0 };
+    state = 'idle';
+    anim = null;
+    updateHud();
+  }
+
+  function detectLap(from, to) {
+    const cp = Track.checkpoint;
+    if (to.x>=cp.x0 && to.x<=cp.x1 && to.y>=cp.y0 && to.y<=cp.y1) armed = true;
+    // franchissement de la ligne vers la droite, checkpoint validé
+    const fx = Track.finishX;
+    if (armed && from.x < fx && to.x >= fx && to.y < 4*TUNING.TILE) {
+      laps++; armed = false;
+      const now = performance.now();
+      const lap = (now - lapStartMs) / 1000;
+      if (bestLap === undefined || lap < bestLap) bestLap = lap;
+      lapStartMs = now;
+    }
+  }
+
+  function showBanner() { updateHud(); banner.classList.add('show'); }
+
+  /* ------------------------------ rendu ------------------------------- */
+  function drawCar(x, y, ang) {
+    ctx.save();
+    ctx.translate(x, y); ctx.rotate(ang);
+    // ombre
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.beginPath(); ctx.ellipse(0, 3, 11, 7, 0, 0, 7); ctx.fill();
+    // carrosserie
+    ctx.fillStyle = '#ff5252';
+    roundRect(-10, -6, 20, 12, 3); ctx.fill();
+    // toit / habitacle
+    ctx.fillStyle = '#1b1f27';
+    roundRect(-3, -4, 7, 8, 2); ctx.fill();
+    // nez (sens de marche)
+    ctx.fillStyle = '#ffd1d1';
+    ctx.beginPath(); ctx.moveTo(10,-4); ctx.lineTo(14,0); ctx.lineTo(10,4); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawAimAndGhost() {
+    // anneau de poussée max
+    ctx.strokeStyle = 'rgba(255,179,0,0.18)';
+    ctx.lineWidth = 1; ctx.setLineDash([3,4]);
+    ctx.beginPath(); ctx.arc(car.x, car.y, TUNING.maxImpulse, 0, 7); ctx.stroke();
+    ctx.setLineDash([]);
+
+    const hasAim = impulse.x || impulse.y;
+
+    // flèche d'impulsion (l'ordre du pilote)
+    if (hasAim) {
+      const tx = car.x + impulse.x, ty = car.y + impulse.y;
+      arrow(car.x, car.y, tx, ty, 'var(--amber)', 2.5, getCss('--amber'));
+    }
+
+    if (!showAid) return;
+
+    // trajectoire RÉELLE prévue (poussée + inertie) sur ce tour
+    const nv = Physics.step(vel, impulse, Track.surfaceAt(car.x, car.y));
+    const np = { x: car.x + nv.x, y: car.y + nv.y };
+    const hit = Physics.firstHit(car.x, car.y, np.x, np.y);
+    const end = hit ? hit : np;
+    const col = hit ? getCss('--danger') : getCss('--ghost');
+
+    ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.setLineDash([5,4]);
+    ctx.beginPath(); ctx.moveTo(car.x, car.y); ctx.lineTo(end.x, end.y); ctx.stroke();
+    ctx.setLineDash([]);
+    // réticule d'arrivée
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(end.x, end.y, hit?5:4, 0, 7); ctx.fill();
+    if (hit) {
+      ctx.strokeStyle = col; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(end.x-6,end.y-6); ctx.lineTo(end.x+6,end.y+6);
+      ctx.moveTo(end.x+6,end.y-6); ctx.lineTo(end.x-6,end.y+6); ctx.stroke();
+    }
+
+    // continuation en roue libre (montre l'inertie sur 2 tours) — uniquement si pas de crash
+    if (!hit) {
+      let p = np, v = nv, faded = false;
+      ctx.setLineDash([2,5]);
+      for (let i=0;i<2 && !faded;i++){
+        const v2 = Physics.step(v, {x:0,y:0}, Track.surfaceAt(p.x,p.y));
+        const p2 = { x:p.x+v2.x, y:p.y+v2.y };
+        const h2 = Physics.firstHit(p.x,p.y,p2.x,p2.y);
+        const e2 = h2 ? h2 : p2;
+        ctx.strokeStyle = 'rgba(74,222,128,'+(0.30 - i*0.1)+')';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(e2.x,e2.y); ctx.stroke();
+        if (h2) faded = true;
+        p = p2; v = v2;
+      }
+      ctx.setLineDash([]);
+    }
+  }
+
+  function render(now) {
+    // fond + tracé caché
+    ctx.clearRect(0, 0, Track.W, Track.H);
+    ctx.drawImage(Track.cache, 0, 0, Track.W, Track.H);
+
+    if (state === 'animating' && anim) {
+      const t = Math.min(1, (now - anim.t0) / anim.dur);
+      const e = 1 - Math.pow(1 - t, 2); // easing out
+      const x = anim.from.x + (anim.to.x - anim.from.x) * e;
+      const y = anim.from.y + (anim.to.y - anim.from.y) * e;
+      drawCar(x, y, heading);
+      if (t >= 1) finishMove();
+    } else {
+      if (state === 'idle') drawAimAndGhost();
+      drawCar(car.x, car.y, heading);
+    }
+
+    // temps live
+    if (raceStartMs !== null && state !== 'crashed') {
+      hud.time.textContent = ((now - raceStartMs)/1000).toFixed(1) + 's';
+    }
+    requestAnimationFrame(render);
+  }
+
+  function updateHud() {
+    hud.turn.textContent  = turns;
+    hud.lap.textContent   = laps;
+    hud.best.textContent  = (bestLap !== undefined) ? bestLap.toFixed(1)+'s' : '—';
+    hud.speed.textContent = Math.round(Math.hypot(vel.x, vel.y));
+    const s = Track.surfaceAt(car.x, car.y);
+    hud.surf.textContent = s.label;
+    hud.surfDot.style.background = s.dot;
+  }
+
+  /* ----- petits helpers de dessin ----- */
+  function roundRect(x,y,w,h,r){ ctx.beginPath();
+    ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+  function arrow(x0,y0,x1,y1,strokeVar,w,solid){
+    ctx.strokeStyle = solid; ctx.fillStyle = solid; ctx.lineWidth = w;
+    ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y1); ctx.stroke();
+    const a = Math.atan2(y1-y0, x1-x0), h = 7;
+    ctx.beginPath(); ctx.moveTo(x1,y1);
+    ctx.lineTo(x1-h*Math.cos(a-0.4), y1-h*Math.sin(a-0.4));
+    ctx.lineTo(x1-h*Math.cos(a+0.4), y1-h*Math.sin(a+0.4));
+    ctx.closePath(); ctx.fill();
+  }
+  const cssCache = {};
+  function getCss(v){ return cssCache[v] || (cssCache[v]=getComputedStyle(document.documentElement).getPropertyValue(v).trim()); }
+
+  /* ------------------------------ boutons ----------------------------- */
+  document.getElementById('btn-go').addEventListener('click', commit);
+  document.getElementById('btn-restart').addEventListener('click', reset);
+  document.getElementById('banner-restart').addEventListener('click', reset);
+  const aidBtn = document.getElementById('btn-aid');
+  aidBtn.addEventListener('click', ()=>{
+    showAid = !showAid;
+    aidBtn.setAttribute('aria-pressed', String(showAid));
+    aidBtn.firstChild.textContent = `Aide à la visée : ${showAid?'ON':'OFF'} `;
+  });
+  window.addEventListener('keydown', (e)=>{
+    if (e.code === 'Space'){ e.preventDefault(); commit(); }
+    else if (e.key === 'r' || e.key === 'R') reset();
+    else if (e.key === 'a' || e.key === 'A') aidBtn.click();
+  });
+
+  reset();
+  requestAnimationFrame(render);
+  return {};
+})();
+</script>
+</body>
+</html>
