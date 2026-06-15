@@ -19,9 +19,10 @@ const angleBetween = (a: Vec2, b: Vec2): number => {
 describe('coneHalfAngle (PRD 12)', () => {
   it('à vitesse nulle, ≈ base sur sol adhérent (quasi déterministe)', () => {
     const half = coneHalfAngle(0, S.ROAD, car, D);
-    // route grip 0.92 : base + kSurf*0.08, proche de base
+    // route grip 0.92 : base + kSurf*0.08 (terme vitesse absent), proche de base
     expect(half).toBeCloseTo(D.coneBase + D.kSurf * (1 - S.ROAD.grip), 6);
-    expect(half).toBeLessThan(D.coneBase + 0.03);
+    // nettement plus serré qu'à pleine vitesse (quasi déterministe à l'arrêt)
+    expect(half).toBeLessThan(coneHalfAngle(car.maxSpeed, S.ROAD, car, D) * 0.5);
   });
 
   it('croît de façon monotone avec la vitesse', () => {
