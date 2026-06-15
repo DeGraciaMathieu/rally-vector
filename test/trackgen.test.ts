@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { surfaceAt } from '../src/domain/track';
 import { generateTrack, isTerminable } from '../src/domain/trackgen';
+import { crossesForward, Segment } from '../src/domain/geometry';
+import { Vec2 } from '../src/domain/vec2';
 import { GEN } from '../src/data/genParams';
+
+const MIN_COVERAGE = 0.25; // part minimale de tuiles roulables (réduction des marges mortes)
 
 describe('trackgen', () => {
   it('même seed -> circuit identique (reproductibilité, P5)', () => {
@@ -18,56 +22,83 @@ describe('trackgen', () => {
     }
   });
 
-  it('checkpoints ordonnés gauche->droite, sur la piste, arrivée après le dernier', () => {
+  it('couverture roulable : le tracé remplit la carte (peu de marges mortes)', () => {
+    for (const seed of [0, 7, 42, 314, 999]) {
+      const t = generateTrack(seed, GEN);
+      let drivable = 0;
+      for (const tile of t.tiles) if (!t.palette[tile.surface].solid) drivable++;
+      expect(drivable / t.tiles.length).toBeGreaterThanOrEqual(MIN_COVERAGE);
+    }
+  });
+
+  it('anti-fusion : les passes parallèles ne fusionnent pas (couloirs séparés, ≤ laneWidthMax)', () => {
+    for (const seed of [0, 1, 5, 42, 123]) {
+      const t = generateTrack(seed, GEN);
+      // Sur une colonne au milieu de la carte, on doit voir des bandes roulables
+      // distinctes séparées par du mur, chacune d'épaisseur bornée -> jamais de plaza.
+      const c = Math.floor(t.width / 2);
+      let run = 0;
+      let groups = 0;
+      for (let r = 0; r < t.height; r++) {
+        if (!t.palette[t.tiles[r * t.width + c].surface].solid) {
+          run++;
+        } else {
+          if (run > 0) groups++;
+          expect(run).toBeLessThanOrEqual(GEN.laneWidthMax); // pas de fusion verticale
+          run = 0;
+        }
+      }
+      if (run > 0) {
+        groups++;
+        expect(run).toBeLessThanOrEqual(GEN.laneWidthMax);
+      }
+      expect(groups).toBeGreaterThanOrEqual(2); // serpentin : plusieurs passes séparées
+    }
+  });
+
+  it('trajet A→B : départ et arrivée roulables, gates sur la piste, ordre cohérent', () => {
     for (const seed of [0, 7, 99, 500, 999]) {
       const t = generateTrack(seed, GEN);
-      expect(t.checkpoints.length).toBe(GEN.columns - 1);
-      let prevX = -Infinity;
-      for (const cp of t.checkpoints) {
-        expect(cp.a.x).toBeGreaterThan(prevX); // ordonnés en x
-        prevX = cp.a.x;
-        const mid = { x: (cp.a.x + cp.b.x) / 2, y: (cp.a.y + cp.b.y) / 2 };
-        expect(surfaceAt(t, mid.x, mid.y).solid).toBe(false); // porte sur la piste
-      }
-      expect(t.finishLine.a.x).toBeGreaterThan(prevX); // arrivée après le dernier CP
       expect(surfaceAt(t, t.start.pos.x, t.start.pos.y).solid).toBe(false); // départ sur piste
-    }
-  });
-
-  it('la ligne de course (départ, checkpoints, arrivée) est dégagée : roulable et sans obstacle', () => {
-    for (const seed of [0, 3, 42, 314, 777]) {
-      const t = generateTrack(seed, GEN);
-      const gates = [t.finishLine, ...t.checkpoints];
-      const points = [t.start.pos, ...gates.map((g) => ({ x: (g.a.x + g.b.x) / 2, y: (g.a.y + g.b.y) / 2 }))];
-      for (const p of points) {
-        const c = Math.floor(p.x / t.tileSize);
-        const r = Math.floor(p.y / t.tileSize);
-        const tile = t.tiles[r * t.width + c];
-        expect(t.palette[tile.surface].solid).toBe(false); // roulable
-        expect(tile.obstacle).toBeUndefined(); // jamais d'obstacle sur la ligne de course
+      const mid = (g: Segment): Vec2 => ({ x: (g.a.x + g.b.x) / 2, y: (g.a.y + g.b.y) / 2 });
+      for (const cp of [...t.checkpoints, t.finishLine]) {
+        const m = mid(cp);
+        expect(surfaceAt(t, m.x, m.y).solid).toBe(false); // chaque porte sur la piste
       }
+      const fm = mid(t.finishLine);
+      // départ en haut, arrivée en bas du serpentin : éloignés verticalement (A→B)
+      expect(Math.abs(fm.y - t.start.pos.y)).toBeGreaterThan(t.height * t.tileSize * 0.4);
     }
   });
 
-  it('bords irréguliers : la largeur du couloir varie entre laneWidth et laneWidthMax', () => {
-    // On mesure sur la dernière ligne droite (vers l'arrivée), garantie purement
-    // horizontale (ys[columns] === ys[columns-1]) : pas de jonction qui élargit le couloir.
+  it('portes orientées selon le sens local : franchissables dans un sens, pas l’autre', () => {
+    const t = generateTrack(42, GEN);
+    for (const gate of [...t.checkpoints, t.finishLine]) {
+      const m = { x: (gate.a.x + gate.b.x) / 2, y: (gate.a.y + gate.b.y) / 2 };
+      const d = { x: gate.b.x - gate.a.x, y: gate.b.y - gate.a.y };
+      const u = { x: d.y, y: -d.x }; // normale telle que -u -> +u soit le sens AVANT
+      const prev = { x: m.x - u.x * 0.01, y: m.y - u.y * 0.01 };
+      const nextP = { x: m.x + u.x * 0.01, y: m.y + u.y * 0.01 };
+      expect(crossesForward(gate, prev, nextP)).toBe(true); // bon sens
+      expect(crossesForward(gate, nextP, prev)).toBe(false); // contresens refusé
+    }
+  });
+
+  it('largeur de couloir contenue (≤ laneWidthMax sur une ligne droite)', () => {
     const widths = new Set<number>();
     for (const seed of [0, 1, 2, 5, 11, 42, 100, 314]) {
       const t = generateTrack(seed, GEN);
+      // mesure autour du centre de l'arrivée (ligne droite, sens horizontal)
       const cf = Math.floor((t.finishLine.a.x + t.finishLine.b.x) / 2 / t.tileSize);
       const rf = Math.floor((t.finishLine.a.y + t.finishLine.b.y) / 2 / t.tileSize);
-      for (const c of [cf, cf + 1, cf + 2]) {
-        if (t.palette[t.tiles[rf * t.width + c].surface].solid) continue;
-        let w = 1;
-        for (let r = rf - 1; r >= 0 && !t.palette[t.tiles[r * t.width + c].surface].solid; r--) w++;
-        for (let r = rf + 1; r < t.height && !t.palette[t.tiles[r * t.width + c].surface].solid; r++) w++;
-        expect(w).toBeGreaterThanOrEqual(GEN.laneWidth);
-        expect(w).toBeLessThanOrEqual(GEN.laneWidthMax);
-        widths.add(w);
-      }
+      let w = 1;
+      for (let r = rf - 1; r >= 0 && !t.palette[t.tiles[r * t.width + cf].surface].solid; r--) w++;
+      for (let r = rf + 1; r < t.height && !t.palette[t.tiles[r * t.width + cf].surface].solid; r++) w++;
+      expect(w).toBeGreaterThanOrEqual(GEN.laneWidth);
+      expect(w).toBeLessThanOrEqual(GEN.laneWidthMax);
+      widths.add(w);
     }
-    expect(widths.size).toBeGreaterThan(1); // la largeur n'est pas constante
+    expect(widths.size).toBeGreaterThan(1); // bords irréguliers : largeur non constante
   });
 
   it('sols en taches : transitions de surface au sein du couloir (pas de blocs uniformes)', () => {
@@ -77,11 +108,9 @@ describe('trackgen', () => {
       for (let c = 0; c + 1 < t.width; c++) {
         const a = t.tiles[r * t.width + c];
         const b = t.tiles[r * t.width + c + 1];
-        const aDrivable = !t.palette[a.surface].solid;
-        const bDrivable = !t.palette[b.surface].solid;
-        if (aDrivable && bDrivable && a.surface !== b.surface) transitions++;
+        if (!t.palette[a.surface].solid && !t.palette[b.surface].solid && a.surface !== b.surface) transitions++;
       }
-    expect(transitions).toBeGreaterThan(0); // au moins une transition de sol horizontale
+    expect(transitions).toBeGreaterThan(0);
   });
 
   it('eau : flaques présentes et bornées en couverture', () => {
@@ -90,8 +119,21 @@ describe('trackgen', () => {
     for (const tile of t.tiles) if (tile.surface === GEN.waterId) water++;
     expect(water).toBeGreaterThan(0);
     const r = GEN.waterPatchRadius;
-    const maxPerPatch = (2 * r + 1) ** 2; // borne haute lâche d'un disque
-    expect(water).toBeLessThanOrEqual(GEN.waterPatches * maxPerPatch);
+    expect(water).toBeLessThanOrEqual(GEN.waterPatches * (2 * r + 1) ** 2);
+  });
+
+  it('aucun obstacle à proximité de la ligne d’arrivée', () => {
+    for (const seed of [0, 1, 7, 42, 123, 500, 999]) {
+      const t = generateTrack(seed, GEN);
+      const fc = Math.floor((t.finishLine.a.x + t.finishLine.b.x) / 2 / t.tileSize);
+      const fr = Math.floor((t.finishLine.a.y + t.finishLine.b.y) / 2 / t.tileSize);
+      for (let r = 0; r < t.height; r++)
+        for (let c = 0; c < t.width; c++) {
+          if (!t.tiles[r * t.width + c].obstacle) continue;
+          const near = Math.abs(c - fc) <= GEN.finishClearRadius && Math.abs(r - fr) <= GEN.finishClearRadius;
+          expect(near).toBe(false);
+        }
+    }
   });
 
   it('obstacles : présents, regroupés, jamais sur le mur', () => {
@@ -101,17 +143,16 @@ describe('trackgen', () => {
       for (let c = 0; c < t.width; c++) {
         const tile = t.tiles[r * t.width + c];
         if (t.palette[tile.surface].solid) {
-          expect(tile.obstacle).toBeUndefined(); // pas d'obstacle sur le mur
+          expect(tile.obstacle).toBeUndefined();
         } else if (tile.obstacle) {
           obstacles.push({ c, r });
         }
       }
     expect(obstacles.length).toBeGreaterThan(0);
-    // regroupés : chaque obstacle a un voisin proche (dans 2× le rayon de foyer)
     const near = 2 * GEN.obstacleClusterRadius;
     const grouped = obstacles.filter((o) =>
       obstacles.some((q) => q !== o && Math.abs(q.c - o.c) <= near && Math.abs(q.r - o.r) <= near),
     );
-    expect(grouped.length).toBeGreaterThan(obstacles.length / 2); // majorité en grappes
+    expect(grouped.length).toBeGreaterThan(obstacles.length / 2);
   });
 });

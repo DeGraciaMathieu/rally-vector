@@ -1,14 +1,15 @@
 // Génération procédurale d'une SPÉCIALE (étape A→B) déterministe par seed (P5).
-// Le tracé est un couloir roulable qui progresse de gauche à droite par tronçons
-// (horizontal puis vertical) : il relie toujours le départ à l'arrivée -> terminable
-// par construction. Un BFS de connexité le prouve.
+// Le tracé est un SERPENTIN (boustrophédon) qui remplit la carte : des bandes
+// horizontales alternées (gauche↔droite) reliées par des connecteurs verticaux à
+// leurs extrémités — les épingles. Il relie toujours A (haut-gauche) à B (extrémité
+// de la dernière bande) -> terminable par construction. Un BFS de connexité le prouve.
 //
 // La spine (centres exacts du tracé, largeur minimale `half`) est TOUJOURS dégagée :
-// elle garantit la ligne de course. Autour d'elle, le rendu se veut naturel (PRD 14) :
-// - bords de couloir irréguliers (largeur qui varie via un champ de bruit seedé) ;
-// - sols répartis en taches lissées (champ de bruit) plutôt qu'en blocs par tronçon ;
-// - flaques d'eau ponctuelles posées comme hazard ;
-// - obstacles regroupés en grappes (hors-spine).
+// elle garantit la ligne de course. Les bandes sont espacées d'au moins `bandGap`
+// tuiles : deux passes parallèles ne FUSIONNENT jamais en zone ouverte (anti-fusion
+// structurelle), donc la ligne de course reste un couloir lisible (PRD 15, P3/P4).
+// Autour, le rendu se veut naturel (PRD 14) : bords irréguliers, sols en taches,
+// flaques d'eau, obstacles en grappes.
 //
 // Pur et SANS import de data/ : la palette, la table d'obstacles et les paramètres
 // arrivent dans `cfg` (data les fournit). Déterministe : même (seed, cfg) -> même Track.
@@ -25,9 +26,9 @@ export interface GenConfig {
   readonly width: number; // en tuiles
   readonly height: number;
   readonly tileSize: number;
-  readonly columns: number; // nombre de tronçons gauche->droite
   readonly laneWidth: number; // largeur MINIMALE garantie du couloir (spine, impair)
   readonly laneWidthMax: number; // largeur MAXIMALE atteinte par dilatation des bords
+  readonly bandGap: number; // espacement vertical minimal entre bandes (anti-fusion)
   readonly surfaceNoiseScale: number; // échelle (tuiles) du champ de sol -> taille des taches
   readonly edgeThreshold: number; // seuil [0,1] de dilatation des bords (haut = couloir étroit)
   readonly roughChance: number; // part de sol non-route (terre/gravier) dans le champ
@@ -36,6 +37,7 @@ export interface GenConfig {
   readonly obstacleClusters: number; // nombre de foyers d'obstacles
   readonly obstacleClusterRadius: number; // rayon (tuiles) d'un foyer
   readonly obstacleDensity: number; // proba de poser un obstacle sur une tuile DANS un foyer
+  readonly finishClearRadius: number; // rayon (tuiles) sans obstacle autour de l'arrivée
   readonly roadId: SurfaceId;
   readonly roughIds: readonly SurfaceId[];
   readonly waterId: SurfaceId;
@@ -48,7 +50,7 @@ export interface GenConfig {
 const smoothstep = (t: number): number => t * t * (3 - 2 * t);
 
 export function generateTrack(seed: number, cfg: GenConfig): Track {
-  const { width: W, height: H, tileSize, columns } = cfg;
+  const { width: W, height: H, tileSize } = cfg;
   let rng = createRng(seed);
   const next = (): number => {
     const r = nextRandom(rng);
@@ -68,18 +70,28 @@ export function generateTrack(seed: number, cfg: GenConfig): Track {
   const tiles: Tile[] = new Array(W * H);
   for (let i = 0; i < W * H; i++) tiles[i] = { surface: cfg.outOfBounds };
 
-  // Waypoints : x réparti régulièrement gauche->droite, y aléatoire par colonne.
-  // Le dernier tronçon est horizontal (y identique) pour une arrivée propre.
-  const xs: number[] = [];
-  const ys: number[] = [];
-  for (let i = 0; i <= columns; i++) {
-    xs.push(Math.round(margin + ((W - 1 - 2 * margin - runway) * i) / columns));
-    ys.push(randInt(margin, H - 1 - margin));
-  }
-  ys[columns] = ys[columns - 1];
+  // Serpentin : bandes horizontales réparties régulièrement sur la hauteur utile, à au
+  // moins `bandGap` les unes des autres (anti-fusion). Le nombre de bandes varie par
+  // seed -> tracés de densités différentes. La 1re bande tient le départ (haut-gauche).
+  const xL = margin;
+  const xR = W - 1 - margin;
+  const usableH = H - 1 - 2 * margin;
+  const maxBands = Math.max(2, Math.floor(usableH / cfg.bandGap) + 1);
+  const bands = randInt(Math.max(2, maxBands - 1), maxBands);
+  const rowAt = (k: number): number => Math.round(margin + (usableH * k) / (bands - 1));
 
-  // Champs de bruit seedés (valeur bilinéaire lissée). Tirés AVANT le carve, dans un
-  // ordre fixe : un treillis grossier de valeurs, interpolé par tuile -> taches douces.
+  // Coins du serpentin : entrée + sortie de chaque bande ; les segments entre deux
+  // coins consécutifs incluent automatiquement les connecteurs verticaux (épingles).
+  const corners: Vec2[] = [];
+  for (let k = 0; k < bands; k++) {
+    const leftToRight = k % 2 === 0;
+    corners.push({ x: leftToRight ? xL : xR, y: rowAt(k) });
+    corners.push({ x: leftToRight ? xR : xL, y: rowAt(k) });
+  }
+  const lastLeftToRight = (bands - 1) % 2 === 0;
+  const finishDir: Vec2 = { x: lastLeftToRight ? 1 : -1, y: 0 };
+
+  // Champs de bruit seedés (valeur bilinéaire lissée), tirés dans un ordre fixe.
   const scale = cfg.surfaceNoiseScale;
   const latW = Math.floor(W / scale) + 2;
   const latH = Math.floor(H / scale) + 2;
@@ -124,18 +136,16 @@ export function generateTrack(seed: number, cfg: GenConfig): Track {
       }
     spine.add(idx(c, r));
   };
+  // Carve d'un segment axis-aligned (horizontal OU vertical) reliant deux coins.
+  const carveSegment = (p: Vec2, q: Vec2): void => {
+    if (p.y === q.y) for (let c = Math.min(p.x, q.x); c <= Math.max(p.x, q.x); c++) carve(c, p.y);
+    else for (let r = Math.min(p.y, q.y); r <= Math.max(p.y, q.y); r++) carve(p.x, r);
+  };
+  for (let i = 0; i + 1 < corners.length; i++) carveSegment(corners[i], corners[i + 1]);
 
-  for (let i = 0; i < columns; i++) {
-    const x0 = xs[i];
-    const x1 = xs[i + 1];
-    const y0 = ys[i];
-    const y1 = ys[i + 1];
-    for (let c = Math.min(x0, x1); c <= Math.max(x0, x1); c++) carve(c, y0);
-    for (let r = Math.min(y0, y1); r <= Math.max(y0, y1); r++) carve(x1, r);
-  }
-
-  // Dégagement après l'arrivée : runway roulable pour absorber la vitesse.
-  for (let c = xs[columns]; c <= xs[columns] + runway; c++) carve(c, ys[columns]);
+  // Dégagement après l'arrivée : runway roulable dans le sens de la course.
+  const finish = corners[corners.length - 1];
+  for (let i = 1; i <= runway; i++) carve(finish.x + finishDir.x * i, finish.y);
 
   const drivable = (c: number, r: number): boolean =>
     inBounds(c, r) && tiles[idx(c, r)].surface !== cfg.outOfBounds;
@@ -179,37 +189,53 @@ export function generateTrack(seed: number, cfg: GenConfig): Track {
           tiles[idx(center.c + dc, center.r + dr)] = { surface: cfg.waterId };
   }
 
+  // Zone dégagée autour de l'arrivée : aucun obstacle à proximité de la ligne, pour
+  // ne pas piéger le franchissement final (boîte de Chebyshev autour de l'arrivée).
+  const nearFinish = (c: number, r: number): boolean =>
+    Math.abs(c - finish.x) <= cfg.finishClearRadius && Math.abs(r - finish.y) <= cfg.finishClearRadius;
+
   // Obstacles en grappes : des foyers hors-spine, remplis aléatoirement dans leur rayon.
-  // Jamais sur la spine (ligne de course), ni dans l'eau.
+  // Jamais sur la spine (ligne de course), dans l'eau, ni près de l'arrivée.
   const cr = cfg.obstacleClusterRadius;
   for (let i = 0; i < cfg.obstacleClusters; i++) {
-    const focus = pickTile((c, r) => !spine.has(idx(c, r)));
+    const focus = pickTile((c, r) => !spine.has(idx(c, r)) && !nearFinish(c, r));
     if (!focus) continue;
     for (let dr = -cr; dr <= cr; dr++)
       for (let dc = -cr; dc <= cr; dc++) {
         const place = next() < cfg.obstacleDensity;
         const c = focus.c + dc;
         const r = focus.r + dr;
-        if (!place || !drivable(c, r) || spine.has(idx(c, r))) continue;
+        if (!place || !drivable(c, r) || spine.has(idx(c, r)) || nearFinish(c, r)) continue;
         const tile = tiles[idx(c, r)];
         if (tile.surface === cfg.waterId || tile.obstacle) continue;
         tiles[idx(c, r)] = { ...tile, obstacle: pick(cfg.obstacleIds) };
       }
   }
 
-  // Portes : tous les tronçons horizontaux vont vers la droite (sens +x), donc une
-  // porte verticale orientée a(haut)->b(bas) a son sens AVANT vers la droite.
+  // Portes orientées selon le SENS LOCAL du tracé (a->b perpendiculaire au sens, le
+  // côté gauche de a->b étant l'amont). La porte couvre la pleine largeur (maxHalf)
+  // pour qu'on ne la contourne pas par un bord dilaté. Avec les épingles, le sens
+  // d'une bande est ±x ; lap.ts lit ce sens dans l'orientation a->b.
+  const Lg = (maxHalf + 0.5) * tileSize;
   const center = (c: number, r: number): Vec2 => ({ x: (c + 0.5) * tileSize, y: (r + 0.5) * tileSize });
-  const L = (half + 0.5) * tileSize;
-  const gate = (wp: Vec2): Segment => ({ a: { x: wp.x, y: wp.y - L }, b: { x: wp.x, y: wp.y + L } });
+  const gate = (wp: Vec2, dir: Vec2): Segment => {
+    const perp = { x: -dir.y, y: dir.x };
+    return {
+      a: { x: wp.x - Lg * perp.x, y: wp.y - Lg * perp.y },
+      b: { x: wp.x + Lg * perp.x, y: wp.y + Lg * perp.y },
+    };
+  };
 
+  // Un checkpoint au milieu de chaque bande, dans l'ordre du serpentin ; arrivée à
+  // l'extrémité de la dernière bande, après son checkpoint.
   const checkpoints: Segment[] = [];
-  for (let i = 1; i < columns; i++) {
-    const mx = Math.round((xs[i] + xs[i + 1]) / 2);
-    checkpoints.push(gate(center(mx, ys[i])));
+  for (let k = 0; k < bands; k++) {
+    const leftToRight = k % 2 === 0;
+    const mx = Math.round((xL + xR) / 2);
+    checkpoints.push(gate(center(mx, rowAt(k)), { x: leftToRight ? 1 : -1, y: 0 }));
   }
-  const finishLine = gate(center(xs[columns], ys[columns]));
-  const start = { pos: center(xs[0], ys[0]), heading: 0 };
+  const finishLine = gate(center(finish.x, finish.y), finishDir);
+  const start = { pos: center(corners[0].x, corners[0].y), heading: 0 };
 
   const track: Track = {
     id: `stage-${seed}`,
