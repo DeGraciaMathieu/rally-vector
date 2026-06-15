@@ -17,6 +17,7 @@ import {
 } from '../domain/gameState';
 import { Car } from '../domain/car';
 import { ContactKind } from '../domain/collision';
+import { perturb } from '../domain/dispersion';
 import { createRng } from '../domain/rng';
 import { Track, contactAt, isSolid, surfaceAt } from '../domain/track';
 import { Vec2, length, sub } from '../domain/vec2';
@@ -63,9 +64,10 @@ export function animPos(anim: AnimView, now: number): Vec2 {
   return { x: anim.from.x + (anim.to.x - anim.from.x) * e, y: anim.from.y + (anim.to.y - anim.from.y) * e };
 }
 
-// Cœur déterministe d'un tour, sans animation ni comptage : setImpulse → résoudre
-// → appliquer. Utilisé par les tests de déterminisme du RaceState et réutilisable.
-// `strict` (défaut true) = mode crash = fin systématique (préserve P2).
+// Cœur déterministe d'un tour, sans animation ni comptage : setImpulse → perturber
+// (cône, PRD 12) → résoudre → appliquer. Utilisé par les tests de déterminisme du
+// RaceState, le rejeu fantôme et réutilisable. `strict` (défaut true) = mode crash =
+// fin (P2) ; `dispersion` (défaut true) = bruit seedé sur l'impulsion (P5).
 export function advanceTurn(
   state: RaceState,
   track: Track,
@@ -73,11 +75,21 @@ export function advanceTurn(
   car: Car,
   impulse: Vec2,
   strict = true,
+  dispersion = true,
 ): RaceState {
-  const aimed = setImpulse(state, impulse);
+  const aimed = setImpulse(state, impulse); // impulsion VOULUE
   const surf = surfaceAt(track, aimed.car.pos.x, aimed.car.pos.y);
+  let applied = aimed.impulse;
+  let rng = aimed.rng;
+  if (dispersion) {
+    const p = perturb(aimed.impulse, length(aimed.car.vel), surf, car, tuning.dispersion, rng);
+    applied = p.impulse; // impulsion APPLIQUÉE (voulue + bruit borné)
+    rng = p.rng; // RNG avancé d'un nombre fixe de tirages (avant un éventuel spin)
+  }
+  const dispersed = { ...aimed, rng };
   const move = resolveMove(
-    aimed,
+    dispersed,
+    applied,
     surf,
     tuning,
     car,
@@ -85,7 +97,7 @@ export function advanceTurn(
     (x, y) => contactAt(track, x, y),
     strict,
   );
-  return applyMove(aimed, move, tuning);
+  return applyMove(dispersed, move, tuning);
 }
 
 export interface TurnResult {
@@ -97,6 +109,7 @@ export class Simulation {
   private _state: RaceState;
   private _anim: Anim | null = null;
   private _strict: boolean;
+  private _dispersion: boolean;
   private _car: Car;
   private readonly laps: LapTracker;
 
@@ -106,9 +119,11 @@ export class Simulation {
     car: Car,
     private seed: number,
     strict = true,
+    dispersion = true,
   ) {
     this._state = createRaceState(createRng(seed), track.start);
     this._strict = strict;
+    this._dispersion = dispersion;
     this._car = car;
     this.laps = new LapTracker(track);
   }
@@ -116,6 +131,15 @@ export class Simulation {
   // Mode strict : crash = fin systématique (préserve la version d'origine).
   setStrict(strict: boolean): void {
     this._strict = strict;
+  }
+
+  // Cône d'incertitude (PRD 12) : bruit seedé sur l'impulsion validée.
+  setDispersion(dispersion: boolean): void {
+    this._dispersion = dispersion;
+  }
+
+  get dispersionOn(): boolean {
+    return this._dispersion;
   }
 
   // Voiture sélectionnée (caractéristiques lues par la physique).
@@ -148,8 +172,24 @@ export class Simulation {
   commit(now: number): boolean {
     if (this._state.phase !== 'idle') return false;
     const surf = surfaceAt(this.track, this._state.car.pos.x, this._state.car.pos.y);
+    // Perturbation seedée AVANT step (cône PRD 12) : appliquée = voulue + bruit borné.
+    // Le RNG avance d'un nombre fixe de tirages, AVANT un éventuel spin (applyMove).
+    let applied = this._state.impulse;
+    if (this._dispersion) {
+      const p = perturb(
+        this._state.impulse,
+        length(this._state.car.vel),
+        surf,
+        this._car,
+        this.tuning.dispersion,
+        this._state.rng,
+      );
+      applied = p.impulse;
+      this._state = { ...this._state, rng: p.rng };
+    }
     const move = resolveMove(
       this._state,
+      applied,
       surf,
       this.tuning,
       this._car,
@@ -160,8 +200,8 @@ export class Simulation {
     const dist = length(sub(move.to, move.from));
     const { min, max, pxPerMs } = this.tuning.anim;
     const dur = Math.min(max, Math.max(min, dist / pxPerMs));
-    // Flags cosmétiques lus avant beginMove (vitesse/impulsion d'entrée du tour).
-    const skid = skidAmount(this._state.car.vel, this._state.impulse, this._car.maxSpeed);
+    // Flags cosmétiques lus avant beginMove (vitesse + impulsion APPLIQUÉE du tour).
+    const skid = skidAmount(this._state.car.vel, applied, this._car.maxSpeed);
     const speed = length(this._state.car.vel);
     this._state = beginMove(this._state);
     this._anim = { from: move.from, to: move.to, heading: move.heading, t0: now, dur, move, skid, speed };

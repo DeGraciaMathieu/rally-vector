@@ -48,6 +48,7 @@ let renderer = new CanvasRenderer(canvas, track, TUNING);
 
 let showAid = true;
 let strictCrash = true; // mode crash = fin systématique (préserve la version d'origine)
+let dispersionOn = true; // cône d'incertitude seedé sur l'impulsion (PRD 12)
 
 // Contre-la-montre : enregistreur de la course en cours + fantôme du meilleur record.
 const recorder = new Recorder();
@@ -103,6 +104,7 @@ const banner = el('banner');
 const toast = el('toast');
 const aidBtn = el('btn-aid');
 const strictBtn = el('btn-strict');
+const dispersionBtn = el('btn-dispersion');
 const carBtn = el('btn-car');
 const carStats = el('car-stats');
 const trackBtn = el('btn-track');
@@ -143,7 +145,7 @@ function reset(): void {
 // Charge un circuit (boucle faite main ou étape générée) et relance la spéciale.
 function setTrack(next: Track): void {
   track = next;
-  sim = new Simulation(track, TUNING, car, SEED, strictCrash);
+  sim = new Simulation(track, TUNING, car, SEED, strictCrash, dispersionOn);
   renderer = new CanvasRenderer(canvas, track, TUNING);
   bounds = makeBounds();
   trackBtn.firstChild!.textContent = `Circuit : ${track.name} `;
@@ -216,6 +218,13 @@ function toggleStrict(): void {
   if (strictBtn.firstChild) strictBtn.firstChild.textContent = `Crash = fin : ${strictCrash ? 'ON' : 'OFF'} `;
 }
 
+function toggleDispersion(): void {
+  dispersionOn = !dispersionOn;
+  sim.setDispersion(dispersionOn);
+  dispersionBtn.setAttribute('aria-pressed', String(dispersionOn));
+  if (dispersionBtn.firstChild) dispersionBtn.firstChild.textContent = `Dispersion : ${dispersionOn ? 'ON' : 'OFF'} `;
+}
+
 const bannerTitle = el('banner-title');
 const bannerText = el('banner-text');
 function showBanner(title: string, text: string): void {
@@ -230,6 +239,7 @@ el('btn-restart').addEventListener('click', reset);
 el('banner-restart').addEventListener('click', reset);
 aidBtn.addEventListener('click', toggleAid);
 strictBtn.addEventListener('click', toggleStrict);
+dispersionBtn.addEventListener('click', toggleDispersion);
 carBtn.addEventListener('click', () => loadCar((carIndex + 1) % cars.length));
 trackBtn.addEventListener('click', () => loadTrack((trackIndex + 1) % tracks.length));
 stageBtn.addEventListener('click', newStage);
@@ -244,6 +254,7 @@ bindInput(canvas, VIEWPORT, {
   onReset: reset,
   onToggleAid: toggleAid,
   onToggleView: toggleView,
+  onToggleDispersion: toggleDispersion,
 });
 
 function frame(now: number): void {
@@ -261,6 +272,7 @@ function frame(now: number): void {
           carId: car.id,
           trackId: track.id,
           strict: strictCrash,
+          dispersion: dispersionOn,
           timeMs,
         }),
       );
@@ -301,11 +313,14 @@ function frame(now: number): void {
     camera = fitCamera(VIEWPORT, bounds);
   } else {
     const { lookAhead, deadZone, smoothing } = TUNING.camera;
-    const target = followTarget(focusPoint(now), sim.state.impulse, lookAhead, deadZone);
+    // Anticipation seulement pendant le déplacement (impulsion figée au commit) : en
+    // visée, l'impulsion change à chaque drag et ferait trembler la caméra.
+    const lead = sim.state.phase === 'animating' ? sim.state.impulse : ZERO;
+    const target = followTarget(focusPoint(now), lead, lookAhead, deadZone);
     camera = follow({ ...camera, zoom: TUNING.camera.followZoom }, target, VIEWPORT, bounds, smoothing);
   }
 
-  renderer.draw(now, sim.state, sim.anim, showAid, camera, car, ghostFrames);
+  renderer.draw(now, sim.state, sim.anim, showAid, camera, car, ghostFrames, dispersionOn);
 
   if (raceStartMs !== null && sim.state.phase !== 'crashed' && !stageFinished) {
     hud.time.textContent = ((now - raceStartMs) / 1000).toFixed(1) + 's';

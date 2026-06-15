@@ -4,6 +4,7 @@
 
 import { Car } from './car';
 import { Contact, ContactPolicy, classifyContact, firstHit } from './collision';
+import { DispersionTuning } from './dispersion';
 import { step } from './physics';
 import { RngState, nextRandom } from './rng';
 import { Surface } from './surfaces';
@@ -39,6 +40,8 @@ export interface Tuning {
     readonly cancelRadius: number; // cible en deçà (px de la voiture) = roue libre (impulsion nulle)
     readonly commitMinDrag: number; // déplacement pointeur min pour qu'un geste compte (anti-tap)
   };
+  // Cône d'incertitude (PRD 12). Demi-angles en radians.
+  readonly dispersion: DispersionTuning;
   // Conséquences au contact (PRD 04). Seuils en fraction de maxSpeed.
   readonly contact: {
     readonly fatalSpeedFrac: number; // au-dessus -> fatal même sur cible souple
@@ -86,6 +89,7 @@ export function setImpulse(state: RaceState, impulse: Vec2): RaceState {
 // l'impact ; `strict` force toujours fatal (mode crash = fin).
 export function resolveMove(
   state: RaceState,
+  impulse: Vec2,
   surf: Surface,
   tuning: Tuning,
   car: Car,
@@ -93,7 +97,7 @@ export function resolveMove(
   contactAt: (x: number, y: number) => ContactPolicy,
   strict: boolean,
 ): ResolvedMove {
-  const { car: body, impulse } = state;
+  const { car: body } = state;
   const newVel = step(body.vel, impulse, surf, car);
   const target = add(body.pos, newVel);
   const hit = firstHit(body.pos.x, body.pos.y, target.x, target.y, isSolid);

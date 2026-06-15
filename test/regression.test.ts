@@ -46,7 +46,8 @@ describe('non-régression A↔B (PRD 11)', () => {
       const impB = solveImpulse(pos, vel, target, surf, car);
       expect(impB.x).toBeCloseTo(impA.x, 6);
       expect(impB.y).toBeCloseTo(impA.y, 6);
-      state = advanceTurn(state, track01, TUNING, car, impA);
+      // dispersion off : on isole l'inversion déterministe (hors bruit seedé)
+      state = advanceTurn(state, track01, TUNING, car, impA, true, false);
     }
   });
 

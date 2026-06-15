@@ -45,6 +45,7 @@ export interface InputCallbacks {
   onReset: () => void;
   onToggleAid: () => void;
   onToggleView: () => void;
+  onToggleDispersion: () => void;
 }
 
 export function bindInput(
@@ -104,6 +105,8 @@ export function bindInput(
       cb.onToggleAid();
     } else if (e.key === 'c' || e.key === 'C') {
       cb.onToggleView();
+    } else if (e.key === 'd' || e.key === 'D') {
+      cb.onToggleDispersion();
     }
   });
 }

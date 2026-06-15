@@ -5,6 +5,9 @@ import type { Tuning } from '../domain/gameState';
 export const TUNING: Tuning = {
   anim: { min: 180, max: 480, pxPerMs: 0.34 }, // durée d'animation du déplacement
   aim: { cancelRadius: 8, commitMinDrag: 6 }, // zone morte d'annulation + seuil anti-tap
+  // Cône d'incertitude (PRD 12). base ≈ 2° ; +~12° à vitesse max ; +~8° sur gravier
+  // (grip 0.4) ; jitter de magnitude ±8 %. Angles en radians.
+  dispersion: { coneBase: 0.035, kV: 0.209, kSurf: 0.227, magJitter: 0.08 },
   contact: {
     fatalSpeedFrac: 0.7, // au-dessus de 70% de maxSpeed, tout contact est fatal
     spinSpeedFrac: 0.25, // entre 25% et 70% : tête-à-queue ; en deçà : frôlement

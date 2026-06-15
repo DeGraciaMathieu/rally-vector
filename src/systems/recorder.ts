@@ -11,6 +11,7 @@ export interface Recording {
   readonly carId: string;
   readonly trackId: string;
   readonly strict: boolean; // mode crash = fin au moment de l'enregistrement
+  readonly dispersion: boolean; // cône d'incertitude actif à l'enregistrement (PRD 12)
   readonly timeMs: number; // temps de référence (meilleur tour en boucle, ou temps d'étape)
   readonly impulses: readonly Vec2[]; // séquence depuis le départ
 }
@@ -21,6 +22,7 @@ export interface RecordingMeta {
   readonly carId: string;
   readonly trackId: string;
   readonly strict: boolean;
+  readonly dispersion: boolean;
   readonly timeMs: number;
 }
 

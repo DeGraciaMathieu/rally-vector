@@ -155,6 +155,7 @@
     <button class="primary" id="btn-go">Valider le déplacement <kbd>Espace</kbd></button>
     <button id="btn-aid" aria-pressed="true">Aide à la visée : ON <kbd>A</kbd></button>
     <button id="btn-strict" aria-pressed="true">Crash = fin : ON </button>
+    <button id="btn-dispersion" aria-pressed="true">Dispersion : ON <kbd>D</kbd></button>
     <button id="btn-car">Voiture : … </button>
     <button id="btn-track">Circuit : … </button>
     <button id="btn-stage">Nouvelle étape</button>
@@ -169,8 +170,10 @@
     l'<b style="color:var(--ghost)">inertie</b>. Le <b style="color:var(--amber)">disque</b> montre jusqu'où le grip
     te laisse plier (petit sur gravier, large sur route). Tirer vers la voiture freine
     (<b style="color:var(--brake)">cyan</b>) ; si la trajectoire vire au <b style="color:var(--danger)">rouge</b>,
-    tu pars dans le mur. <b>Lâche</b> pour valider — relâcher sur la voiture = roue libre.
-    <kbd>Espace</kbd> valide aussi, <kbd>Échap</kbd> annule.
+    tu pars dans le mur. La pointe n'est pas un point mais un <b>secteur</b> : à grande vitesse
+    et sur faible grip, l'impulsion part avec du <b>jeu</b> — c'est un pari, laisse de la marge.
+    <b>Lâche</b> pour valider — relâcher sur la voiture = roue libre.
+    <kbd>Espace</kbd> valide aussi, <kbd>Échap</kbd> annule. <kbd>D</kbd> coupe la dispersion.
     <kbd>C</kbd> bascule la <b>vue circuit</b> (dézoom complet) pour reconnaître la spéciale.
   </p>
 

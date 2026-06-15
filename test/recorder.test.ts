@@ -35,6 +35,7 @@ describe('recorder', () => {
       carId: car.id,
       trackId: track01.id,
       strict: true,
+      dispersion: true,
       timeMs: 1234,
     });
 
@@ -56,6 +57,7 @@ describe('recorder', () => {
       carId: car.id,
       trackId: track01.id,
       strict: true,
+      dispersion: true,
       timeMs: 0,
     });
     rec.record({ x: 2, y: 0 });

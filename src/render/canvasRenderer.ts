@@ -6,6 +6,7 @@
 import { Car } from '../domain/car';
 import { RaceState, Tuning } from '../domain/gameState';
 import { firstHit } from '../domain/collision';
+import { DispersionTuning, coneHalfAngle } from '../domain/dispersion';
 import { reachableRadius, step } from '../domain/physics';
 import { Surface } from '../domain/surfaces';
 import { Track, isSolid, surfaceAt, trackHeightPx, trackWidthPx } from '../domain/track';
@@ -31,6 +32,7 @@ export class CanvasRenderer {
   private prevCar: Vec2 | null = null;
   private lastSpeed = 0;
   private prevPhase: RaceState['phase'] = 'idle';
+  private readonly dispersion: DispersionTuning; // tuning du cône (lecture seule, PRD 12)
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -39,6 +41,7 @@ export class CanvasRenderer {
   ) {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.dpr = dpr;
+    this.dispersion = tuning.dispersion;
     const { width, height } = tuning.camera.viewport;
     this.vw = width;
     this.vh = height;
@@ -193,6 +196,7 @@ export class CanvasRenderer {
     camera: Camera,
     car: Car,
     ghost: GhostFrame[] | null,
+    dispersionOn: boolean,
   ): void {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.vw, this.vh);
@@ -232,7 +236,7 @@ export class CanvasRenderer {
       this.drawCar(p.x, p.y, anim.heading, car.livery);
     } else {
       this.prevCar = null;
-      if (state.phase === 'idle') this.drawAimAndGhost(state, showAid, car);
+      if (state.phase === 'idle') this.drawAimAndGhost(state, showAid, car, dispersionOn);
       this.drawCar(state.car.pos.x, state.car.pos.y, state.car.heading, car.livery);
     }
 
@@ -320,10 +324,11 @@ export class CanvasRenderer {
     ctx.restore();
   }
 
-  // PRD 11 — geste de visée : on lit l'état (vitesse, impulsion résolue) et on dessine
-  // le vecteur vitesse, la poignée, le disque atteignable et la couleur de frein. Rien
-  // n'est décidé ni écrit ici (le mapping cible -> impulsion vit dans domain/systems).
-  private drawAimAndGhost(state: RaceState, showAid: boolean, car: Car): void {
+  // PRD 11 + 12 — geste de visée : vecteur vitesse, disque atteignable, poignée, et le
+  // SECTEUR d'incertitude (cône PRD 12, échantillonné via step) qui remplace la ligne
+  // nette. Rien n'est décidé ni écrit ici : le bruit est tiré dans domain/systems ;
+  // render n'affiche que l'enveloppe (aucune consommation du RNG).
+  private drawAimAndGhost(state: RaceState, showAid: boolean, car: Car, dispersionOn: boolean): void {
     const ctx = this.ctx;
     const pos = state.car.pos;
     const vel = state.car.vel;
@@ -359,53 +364,107 @@ export class CanvasRenderer {
       ctx.setLineDash([]);
     }
 
-    // Trajectoire RÉELLE prévue (poussée + inertie) sur ce tour. Couleur de frein dès
-    // que l'impulsion demandée s'oppose à la vitesse (composante < 0) — lisibilité de
-    // base, conservée même aide masquée (retour de freinage du PRD 11).
-    const nv = step(vel, impulse, surf, car);
-    const np: Vec2 = { x: pos.x + nv.x, y: pos.y + nv.y };
-    const hit = firstHit(pos.x, pos.y, np.x, np.y, solid);
-    const end = hit ?? np;
+    // Endpoint pour une impulsion voulue tournée de `theta` et mise à l'échelle `mag`.
+    const endpointAt = (theta: number, mag: number): Vec2 => {
+      const c = Math.cos(theta);
+      const s = Math.sin(theta);
+      const ix = (impulse.x * c - impulse.y * s) * mag;
+      const iy = (impulse.x * s + impulse.y * c) * mag;
+      const v = step(vel, { x: ix, y: iy }, surf, car);
+      return { x: pos.x + v.x, y: pos.y + v.y };
+    };
+
+    // Arrivée médiane (bruit nul) = la pointe « voulue ».
+    const median = endpointAt(0, 1);
+    const medHit = firstHit(pos.x, pos.y, median.x, median.y, solid);
     const braking = impulse.x * vel.x + impulse.y * vel.y < 0;
-    const col = hit
-      ? this.getCss('--danger')
-      : braking
-        ? this.getCss('--brake')
-        : this.getCss('--ghost');
+    const aiming = !!(impulse.x || impulse.y);
 
-    ctx.strokeStyle = col;
-    ctx.lineWidth = 2;
-    ctx.setLineDash([5, 4]);
-    ctx.beginPath();
-    ctx.moveTo(pos.x, pos.y);
-    ctx.lineTo(end.x, end.y);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    // Demi-angle du cône (0 si dispersion off ou roue libre) : l'aide se resserre à
+    // basse vitesse, s'ouvre quand on fonce / sur faible grip.
+    const half = dispersionOn && aiming ? coneHalfAngle(Math.hypot(vel.x, vel.y), surf, car, this.dispersion) : 0;
+    const jit = half > 0 ? this.dispersion.magJitter : 0;
+    const showSector = showAid && half > 0;
 
-    // Poignée saisissable au bout de la trajectoire (anneau plein).
+    // Enveloppe des arrivées possibles : arcs externe (mag 1+jit) et interne (1-jit) sur
+    // [-half, +half]. Rouge dès qu'une partie touche un solide (condition de fairness).
+    const N = 9;
+    let anyHit = !!medHit;
+    const outer: Vec2[] = [];
+    const inner: Vec2[] = [];
+    if (showSector) {
+      for (let i = 0; i < N; i++) {
+        const theta = -half + (2 * half * i) / (N - 1);
+        const eo = endpointAt(theta, 1 + jit);
+        if (firstHit(pos.x, pos.y, eo.x, eo.y, solid)) anyHit = true;
+        outer.push(eo);
+        inner.push(endpointAt(theta, 1 - jit));
+      }
+    }
+
+    const danger = showSector ? anyHit : !!medHit;
+    const col = danger ? this.getCss('--danger') : braking ? this.getCss('--brake') : this.getCss('--ghost');
+
+    if (showSector) {
+      // Secteur rempli (éventail des arrivées) + rayons bornant le cône.
+      ctx.fillStyle = col;
+      ctx.globalAlpha = 0.16;
+      ctx.beginPath();
+      ctx.moveTo(outer[0].x, outer[0].y);
+      for (let i = 1; i < N; i++) ctx.lineTo(outer[i].x, outer[i].y);
+      for (let i = N - 1; i >= 0; i--) ctx.lineTo(inner[i].x, inner[i].y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(pos.x, pos.y);
+      ctx.lineTo(outer[0].x, outer[0].y);
+      ctx.moveTo(pos.x, pos.y);
+      ctx.lineTo(outer[N - 1].x, outer[N - 1].y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
+      // Palier réduit / dispersion off : seule la trajectoire médiane (ligne nette).
+      const end = medHit ?? median;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.moveTo(pos.x, pos.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Poignée saisissable à l'arrivée médiane.
+    const hand = medHit ?? median;
     ctx.fillStyle = col;
     ctx.beginPath();
-    ctx.arc(end.x, end.y, hit ? 5 : 6, 0, TAU);
+    ctx.arc(hand.x, hand.y, medHit ? 5 : 6, 0, TAU);
     ctx.fill();
-    if (!hit) {
+    if (!medHit) {
       ctx.fillStyle = this.getCss('--bg');
       ctx.beginPath();
-      ctx.arc(end.x, end.y, 2.5, 0, TAU);
+      ctx.arc(hand.x, hand.y, 2.5, 0, TAU);
       ctx.fill();
     } else {
       ctx.strokeStyle = col;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(end.x - 6, end.y - 6);
-      ctx.lineTo(end.x + 6, end.y + 6);
-      ctx.moveTo(end.x + 6, end.y - 6);
-      ctx.lineTo(end.x - 6, end.y + 6);
+      ctx.moveTo(hand.x - 6, hand.y - 6);
+      ctx.lineTo(hand.x + 6, hand.y + 6);
+      ctx.moveTo(hand.x + 6, hand.y - 6);
+      ctx.lineTo(hand.x - 6, hand.y + 6);
       ctx.stroke();
     }
 
     // continuation en roue libre (inertie sur 2 tours) — aide seulement, si pas de crash
-    if (showAid && !hit) {
-      let p: Vec2 = np;
+    if (showAid && !medHit) {
+      const nv = step(vel, impulse, surf, car);
+      let p: Vec2 = median;
       let v: Vec2 = nv;
       let faded = false;
       ctx.setLineDash([2, 5]);

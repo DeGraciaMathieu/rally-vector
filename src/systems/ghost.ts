@@ -31,7 +31,7 @@ export function buildGhost(
   let state: RaceState = createRaceState(createRng(rec.seed), track.start);
   const frames: GhostFrame[] = [{ pos: state.car.pos, heading: state.car.heading }];
   for (const impulse of rec.impulses) {
-    state = advanceTurn(state, track, tuning, car, impulse, rec.strict);
+    state = advanceTurn(state, track, tuning, car, impulse, rec.strict, rec.dispersion);
     frames.push({ pos: state.car.pos, heading: state.car.heading });
     if (state.phase === 'crashed') break;
   }

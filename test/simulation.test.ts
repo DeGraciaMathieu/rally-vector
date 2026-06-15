@@ -40,14 +40,14 @@ const initial = createRaceState(createRng(1), track.start);
 
 describe('conséquences au contact (PRD 04)', () => {
   it('mode strict : tout contact sur cible souple reste fatal', () => {
-    const s = advanceTurn(initial, track, TUNING, car, { x: 35, y: 0 }, true);
+    const s = advanceTurn(initial, track, TUNING, car, { x: 35, y: 0 }, true, false);
     expect(s.phase).toBe('crashed');
   });
 
   it('spin : arrêt + réorientation seedée, RNG consommé, reproductible', () => {
     // impulsion calibrée pour une vitesse d'impact dans la bande spin [0.25·maxSpeed, 0.7·maxSpeed]
-    const a = advanceTurn(initial, track, TUNING, car, { x: 80, y: 0 }, false);
-    const b = advanceTurn(initial, track, TUNING, car, { x: 80, y: 0 }, false);
+    const a = advanceTurn(initial, track, TUNING, car, { x: 80, y: 0 }, false, false);
+    const b = advanceTurn(initial, track, TUNING, car, { x: 80, y: 0 }, false, false);
     expect(a.phase).toBe('idle'); // pas de fin de course
     expect(a.car.vel).toEqual({ x: 0, y: 0 }); // tête-à-queue = arrêt
     expect(a.turns).toBe(1); // le tour compte
@@ -56,14 +56,14 @@ describe('conséquences au contact (PRD 04)', () => {
   });
 
   it('graze : frôlement, garde de la vitesse, sans consommer le RNG', () => {
-    const g = advanceTurn(initial, track, TUNING, car, { x: 35, y: 0 }, false);
+    const g = advanceTurn(initial, track, TUNING, car, { x: 35, y: 0 }, false, false);
     expect(g.phase).toBe('idle');
     expect(Math.hypot(g.car.vel.x, g.car.vel.y)).toBeGreaterThan(0); // pas d'arrêt
     expect(g.rng).toEqual(initial.rng); // un frôlement ne tire pas le RNG
   });
 
   it('impact rapide sur cible souple : fatal malgré le mode conséquences', () => {
-    const f = advanceTurn(initial, track, TUNING, car, { x: 200, y: 0 }, false);
+    const f = advanceTurn(initial, track, TUNING, car, { x: 200, y: 0 }, false, false);
     expect(f.phase).toBe('crashed');
   });
 });
