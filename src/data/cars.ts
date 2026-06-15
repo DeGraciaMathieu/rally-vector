@@ -11,8 +11,8 @@ export const cars: readonly Car[] = [
   {
     id: 'balanced',
     label: 'Équilibrée',
-    maxImpulse: 26,
-    maxSpeed: 150,
+    maxImpulse: 35,
+    maxSpeed: 200,
     gripFactor: 1,
     dragFactor: 1,
     angleGripLoss: 0.45,
@@ -21,8 +21,8 @@ export const cars: readonly Car[] = [
   {
     id: 'nimble',
     label: 'Vive',
-    maxImpulse: 32,
-    maxSpeed: 120,
+    maxImpulse: 43,
+    maxSpeed: 160,
     gripFactor: 1.2,
     dragFactor: 1.1,
     angleGripLoss: 0.28,
@@ -31,8 +31,8 @@ export const cars: readonly Car[] = [
   {
     id: 'rocket',
     label: 'Fusée',
-    maxImpulse: 22,
-    maxSpeed: 200,
+    maxImpulse: 30,
+    maxSpeed: 270,
     gripFactor: 0.8,
     dragFactor: 0.85,
     angleGripLoss: 0.62,

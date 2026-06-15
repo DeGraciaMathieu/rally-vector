@@ -45,8 +45,9 @@ describe('conséquences au contact (PRD 04)', () => {
   });
 
   it('spin : arrêt + réorientation seedée, RNG consommé, reproductible', () => {
-    const a = advanceTurn(initial, track, TUNING, car, { x: 60, y: 0 }, false);
-    const b = advanceTurn(initial, track, TUNING, car, { x: 60, y: 0 }, false);
+    // impulsion calibrée pour une vitesse d'impact dans la bande spin [0.25·maxSpeed, 0.7·maxSpeed]
+    const a = advanceTurn(initial, track, TUNING, car, { x: 80, y: 0 }, false);
+    const b = advanceTurn(initial, track, TUNING, car, { x: 80, y: 0 }, false);
     expect(a.phase).toBe('idle'); // pas de fin de course
     expect(a.car.vel).toEqual({ x: 0, y: 0 }); // tête-à-queue = arrêt
     expect(a.turns).toBe(1); // le tour compte

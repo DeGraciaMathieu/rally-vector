@@ -7,10 +7,10 @@ import { O } from './obstacles';
 import { S } from './surfaces';
 
 export const GEN: GenConfig = {
-  width: 40,
+  width: 28,
   height: 24,
   tileSize: 36,
-  columns: 7,
+  columns: 5,
   laneWidth: 3, // ≥ marge pour la voiture la plus rapide (terminable au ralenti)
   roughChance: 0.45, // proportion de tronçons en terre/gravier (P4)
   obstacleDensity: 0.1, // proba d'obstacle sur une tuile de bord (hors ligne de course)
