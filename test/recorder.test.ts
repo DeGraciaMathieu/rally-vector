@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createRaceState } from '../src/domain/gameState';
+import { createRaceState, setMod } from '../src/domain/gameState';
 import { createRng } from '../src/domain/rng';
 import type { Vec2 } from '../src/domain/vec2';
 import { cars } from '../src/data/cars';
@@ -25,7 +25,7 @@ describe('recorder', () => {
     let src = createRaceState(createRng(SEED), track01.start);
     const srcTrace: string[] = [JSON.stringify(src)];
     for (const imp of inputs) {
-      rec.record(imp);
+      rec.record(imp, 'none');
       src = advanceTurn(src, track01, TUNING, car, imp, true);
       srcTrace.push(JSON.stringify(src));
     }
@@ -41,8 +41,8 @@ describe('recorder', () => {
 
     let replay = createRaceState(createRng(recording.seed), track01.start);
     const replayTrace: string[] = [JSON.stringify(replay)];
-    for (const imp of recording.impulses) {
-      replay = advanceTurn(replay, track01, TUNING, car, imp, recording.strict);
+    for (const turn of recording.turns) {
+      replay = advanceTurn(setMod(replay, turn.mod), track01, TUNING, car, turn.impulse, recording.strict);
       replayTrace.push(JSON.stringify(replay));
     }
     expect(replayTrace).toEqual(srcTrace);
@@ -50,7 +50,7 @@ describe('recorder', () => {
 
   it('toRecording fige une copie indépendante de la suite enregistrée', () => {
     const rec = new Recorder();
-    rec.record({ x: 1, y: 0 });
+    rec.record({ x: 1, y: 0 }, 'none');
     const snap = rec.toRecording({
       simVersion: SIM_VERSION,
       seed: SEED,
@@ -60,8 +60,8 @@ describe('recorder', () => {
       dispersion: true,
       timeMs: 0,
     });
-    rec.record({ x: 2, y: 0 });
-    expect(snap.impulses).toHaveLength(1);
+    rec.record({ x: 2, y: 0 }, 'none');
+    expect(snap.turns).toHaveLength(1);
     expect(rec.length).toBe(2);
   });
 });

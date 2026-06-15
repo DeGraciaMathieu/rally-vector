@@ -8,6 +8,7 @@ import { RaceState, Tuning } from '../domain/gameState';
 import { firstHit } from '../domain/collision';
 import { DispersionTuning, coneHalfAngle } from '../domain/dispersion';
 import { reachableRadius, step } from '../domain/physics';
+import { ModId, TurnMods } from '../domain/turnmods';
 import { Surface } from '../domain/surfaces';
 import { Track, isSolid, surfaceAt, trackHeightPx, trackWidthPx } from '../domain/track';
 import { Vec2 } from '../domain/vec2';
@@ -197,6 +198,8 @@ export class CanvasRenderer {
     car: Car,
     ghost: GhostFrame[] | null,
     dispersionOn: boolean,
+    mods: TurnMods,
+    modId: ModId,
   ): void {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.vw, this.vh);
@@ -236,7 +239,7 @@ export class CanvasRenderer {
       this.drawCar(p.x, p.y, anim.heading, car.livery);
     } else {
       this.prevCar = null;
-      if (state.phase === 'idle') this.drawAimAndGhost(state, showAid, car, dispersionOn);
+      if (state.phase === 'idle') this.drawAimAndGhost(state, showAid, car, dispersionOn, mods, modId);
       this.drawCar(state.car.pos.x, state.car.pos.y, state.car.heading, car.livery);
     }
 
@@ -328,7 +331,14 @@ export class CanvasRenderer {
   // SECTEUR d'incertitude (cône PRD 12, échantillonné via step) qui remplace la ligne
   // nette. Rien n'est décidé ni écrit ici : le bruit est tiré dans domain/systems ;
   // render n'affiche que l'enveloppe (aucune consommation du RNG).
-  private drawAimAndGhost(state: RaceState, showAid: boolean, car: Car, dispersionOn: boolean): void {
+  private drawAimAndGhost(
+    state: RaceState,
+    showAid: boolean,
+    car: Car,
+    dispersionOn: boolean,
+    mods: TurnMods,
+    modId: ModId,
+  ): void {
     const ctx = this.ctx;
     const pos = state.car.pos;
     const vel = state.car.vel;
@@ -336,8 +346,20 @@ export class CanvasRenderer {
     const surf = surfaceAt(this.track, pos.x, pos.y);
     const solid = (x: number, y: number): boolean => isSolid(this.track, x, y);
 
-    // Endpoint de roue libre (centre du disque atteignable) = là où l'inertie emmène.
-    const coastV = step(vel, { x: 0, y: 0 }, surf, car);
+    // Halo du modificateur actif (PRD 13, cosmétique) : montre que le tour est modifié.
+    if (modId !== 'none') {
+      ctx.strokeStyle = modId === 'boost' ? this.getCss('--danger') : this.getCss('--brake');
+      ctx.globalAlpha = 0.5;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, 16, 0, TAU);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    // Endpoint de roue libre (centre du disque atteignable) = là où l'inertie emmène
+    // ce tour (vitesse scrubée par le frein à main via `mods`).
+    const coastV = step(vel, { x: 0, y: 0 }, surf, car, mods);
     const coast: Vec2 = { x: pos.x + coastV.x, y: pos.y + coastV.y };
 
     // Disque atteignable : aide forte (palier PRD 10), masquée en mode Pro. Même
@@ -347,7 +369,7 @@ export class CanvasRenderer {
       ctx.lineWidth = 1;
       ctx.setLineDash([3, 4]);
       ctx.beginPath();
-      ctx.arc(coast.x, coast.y, reachableRadius(surf, car), 0, TAU);
+      ctx.arc(coast.x, coast.y, reachableRadius(surf, car, mods), 0, TAU);
       ctx.stroke();
       ctx.setLineDash([]);
     }
@@ -370,7 +392,7 @@ export class CanvasRenderer {
       const s = Math.sin(theta);
       const ix = (impulse.x * c - impulse.y * s) * mag;
       const iy = (impulse.x * s + impulse.y * c) * mag;
-      const v = step(vel, { x: ix, y: iy }, surf, car);
+      const v = step(vel, { x: ix, y: iy }, surf, car, mods);
       return { x: pos.x + v.x, y: pos.y + v.y };
     };
 
@@ -382,7 +404,9 @@ export class CanvasRenderer {
 
     // Demi-angle du cône (0 si dispersion off ou roue libre) : l'aide se resserre à
     // basse vitesse, s'ouvre quand on fonce / sur faible grip.
-    const half = dispersionOn && aiming ? coneHalfAngle(Math.hypot(vel.x, vel.y), surf, car, this.dispersion) : 0;
+    const half = dispersionOn && aiming
+      ? coneHalfAngle(Math.hypot(vel.x, vel.y) * mods.vel, surf, car, this.dispersion)
+      : 0;
     const jit = half > 0 ? this.dispersion.magJitter : 0;
     const showSector = showAid && half > 0;
 
@@ -461,9 +485,10 @@ export class CanvasRenderer {
       ctx.stroke();
     }
 
-    // continuation en roue libre (inertie sur 2 tours) — aide seulement, si pas de crash
+    // continuation en roue libre (inertie sur 2 tours) — aide seulement, si pas de crash.
+    // Le tour courant subit le mod ; les tours suivants sont des coups normaux (NEUTRAL).
     if (showAid && !medHit) {
-      const nv = step(vel, impulse, surf, car);
+      const nv = step(vel, impulse, surf, car, mods);
       let p: Vec2 = median;
       let v: Vec2 = nv;
       let faded = false;

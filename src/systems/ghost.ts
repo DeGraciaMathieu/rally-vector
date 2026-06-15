@@ -4,10 +4,11 @@
 // Repartir du départ re-seede le RNG à l'identique : un éventuel tête-à-queue (PRD 04)
 // est rejoué exactement (dépendance fine PRD 04 ↔ 06).
 
-import { RaceState, Tuning, createRaceState } from '../domain/gameState';
+import { RaceState, Tuning, createRaceState, setMod } from '../domain/gameState';
 import { createRng } from '../domain/rng';
 import { Vec2 } from '../domain/vec2';
 import { carById } from '../data/cars';
+import { BOOST_CHARGES } from '../data/modifiers';
 import { resolveTrack } from '../data/tracks';
 import { Recording } from './recorder';
 import { advanceTurn } from './simulation';
@@ -28,10 +29,12 @@ export function buildGhost(
   if (!rec || rec.simVersion !== simVersion) return null;
   const track = resolveTrack(rec.trackId);
   const car = carById(rec.carId);
-  let state: RaceState = createRaceState(createRng(rec.seed), track.start);
+  let state: RaceState = createRaceState(createRng(rec.seed), track.start, BOOST_CHARGES);
   const frames: GhostFrame[] = [{ pos: state.car.pos, heading: state.car.heading }];
-  for (const impulse of rec.impulses) {
-    state = advanceTurn(state, track, tuning, car, impulse, rec.strict, rec.dispersion);
+  for (const turn of rec.turns) {
+    // Le mod fait partie de l'input : on le re-sélectionne avant de rejouer le tour.
+    state = setMod(state, turn.mod);
+    state = advanceTurn(state, track, tuning, car, turn.impulse, rec.strict, rec.dispersion);
     frames.push({ pos: state.car.pos, heading: state.car.heading });
     if (state.phase === 'crashed') break;
   }

@@ -2,4 +2,4 @@
 // circuits changent de façon à invalider les enregistrements de fantômes (un rejeu
 // d'une version obsolète ne reproduirait plus la course -> il est ignoré, PRD 06).
 
-export const SIM_VERSION = 2;
+export const SIM_VERSION = 3;

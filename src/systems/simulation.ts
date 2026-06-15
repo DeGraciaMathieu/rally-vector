@@ -14,14 +14,28 @@ import {
   createRaceState,
   resolveMove,
   setImpulse,
+  setMod,
 } from '../domain/gameState';
 import { Car } from '../domain/car';
 import { ContactKind } from '../domain/collision';
 import { perturb } from '../domain/dispersion';
 import { createRng } from '../domain/rng';
 import { Track, contactAt, isSolid, surfaceAt } from '../domain/track';
+import { ModId, NEUTRAL, TurnMods } from '../domain/turnmods';
 import { Vec2, length, sub } from '../domain/vec2';
+import { BOOST_CHARGES, modifierById } from '../data/modifiers';
 import { LapEvent, LapTracker } from './lap';
+
+// Résout le modificateur effectif d'un tour (PRD 13). Un mod limité (charges ≥ 0,
+// c.-à-d. le boost) n'agit que s'il reste une charge ; sinon le tour est normal — pas
+// d'usage sans charge. Renvoie les multiplicateurs et si une charge est consommée.
+export function resolveTurnMods(mod: ModId, boosts: number): { mods: TurnMods; useBoost: boolean } {
+  const def = modifierById(mod);
+  if (def.charges >= 0) {
+    return boosts > 0 ? { mods: def.mods, useBoost: true } : { mods: NEUTRAL, useBoost: false };
+  }
+  return { mods: def.mods, useBoost: false };
+}
 
 // Vue d'animation lue par render/ (jamais écrite par lui). Purement visuelle.
 // `skid` et `speed` sont des FLAGS EN LECTURE SEULE exposés pour le game feel
@@ -64,10 +78,10 @@ export function animPos(anim: AnimView, now: number): Vec2 {
   return { x: anim.from.x + (anim.to.x - anim.from.x) * e, y: anim.from.y + (anim.to.y - anim.from.y) * e };
 }
 
-// Cœur déterministe d'un tour, sans animation ni comptage : setImpulse → perturber
-// (cône, PRD 12) → résoudre → appliquer. Utilisé par les tests de déterminisme du
-// RaceState, le rejeu fantôme et réutilisable. `strict` (défaut true) = mode crash =
-// fin (P2) ; `dispersion` (défaut true) = bruit seedé sur l'impulsion (P5).
+// Cœur déterministe d'un tour, sans animation ni comptage : setImpulse → modificateur
+// (PRD 13) → perturber (cône, PRD 12) → résoudre → appliquer. Le mod est lu dans
+// `state.mod`. Utilisé par les tests de déterminisme, le rejeu fantôme et réutilisable.
+// `strict` (défaut true) = crash = fin (P2) ; `dispersion` (défaut true) = bruit seedé.
 export function advanceTurn(
   state: RaceState,
   track: Track,
@@ -79,16 +93,21 @@ export function advanceTurn(
 ): RaceState {
   const aimed = setImpulse(state, impulse); // impulsion VOULUE
   const surf = surfaceAt(track, aimed.car.pos.x, aimed.car.pos.y);
+  // Modificateur du tour (PRD 13) : multiplicateurs effectifs + décrément de charge.
+  const { mods, useBoost } = resolveTurnMods(aimed.mod, aimed.boosts);
+  const boostsAfter = useBoost ? aimed.boosts - 1 : aimed.boosts;
   let applied = aimed.impulse;
   let rng = aimed.rng;
   if (dispersion) {
-    const p = perturb(aimed.impulse, length(aimed.car.vel), surf, car, tuning.dispersion, rng);
+    // La dispersion lit la vitesse EFFECTIVE (scrubée par le frein à main) : cône plus
+    // serré au pivot lent. 2 tirages fixes, avant un éventuel spin (ordre canonique).
+    const p = perturb(aimed.impulse, length(aimed.car.vel) * mods.vel, surf, car, tuning.dispersion, rng);
     applied = p.impulse; // impulsion APPLIQUÉE (voulue + bruit borné)
-    rng = p.rng; // RNG avancé d'un nombre fixe de tirages (avant un éventuel spin)
+    rng = p.rng;
   }
-  const dispersed = { ...aimed, rng };
+  const pre = { ...aimed, rng, boosts: boostsAfter };
   const move = resolveMove(
-    dispersed,
+    pre,
     applied,
     surf,
     tuning,
@@ -96,8 +115,9 @@ export function advanceTurn(
     (x, y) => isSolid(track, x, y),
     (x, y) => contactAt(track, x, y),
     strict,
+    mods,
   );
-  return applyMove(dispersed, move, tuning);
+  return applyMove(pre, move, tuning);
 }
 
 export interface TurnResult {
@@ -121,7 +141,7 @@ export class Simulation {
     strict = true,
     dispersion = true,
   ) {
-    this._state = createRaceState(createRng(seed), track.start);
+    this._state = createRaceState(createRng(seed), track.start, BOOST_CHARGES);
     this._strict = strict;
     this._dispersion = dispersion;
     this._car = car;
@@ -142,6 +162,12 @@ export class Simulation {
     return this._dispersion;
   }
 
+  // Modificateur du prochain tour (PRD 13). Seulement à l'arrêt (sélection pré-validation).
+  setMod(mod: ModId): void {
+    if (this._state.phase !== 'idle') return;
+    this._state = setMod(this._state, mod);
+  }
+
   // Voiture sélectionnée (caractéristiques lues par la physique).
   setCar(car: Car): void {
     this._car = car;
@@ -157,7 +183,7 @@ export class Simulation {
 
   reset(seed: number = this.seed): void {
     this.seed = seed;
-    this._state = createRaceState(createRng(seed), this.track.start);
+    this._state = createRaceState(createRng(seed), this.track.start, BOOST_CHARGES);
     this._anim = null;
     this.laps.reset();
   }
@@ -172,13 +198,16 @@ export class Simulation {
   commit(now: number): boolean {
     if (this._state.phase !== 'idle') return false;
     const surf = surfaceAt(this.track, this._state.car.pos.x, this._state.car.pos.y);
+    // Modificateur du tour (PRD 13) : multiplicateurs + décrément de charge (boost).
+    const { mods, useBoost } = resolveTurnMods(this._state.mod, this._state.boosts);
+    if (useBoost) this._state = { ...this._state, boosts: this._state.boosts - 1 };
     // Perturbation seedée AVANT step (cône PRD 12) : appliquée = voulue + bruit borné.
     // Le RNG avance d'un nombre fixe de tirages, AVANT un éventuel spin (applyMove).
     let applied = this._state.impulse;
     if (this._dispersion) {
       const p = perturb(
         this._state.impulse,
-        length(this._state.car.vel),
+        length(this._state.car.vel) * mods.vel,
         surf,
         this._car,
         this.tuning.dispersion,
@@ -196,6 +225,7 @@ export class Simulation {
       (x, y) => isSolid(this.track, x, y),
       (x, y) => contactAt(this.track, x, y),
       this._strict,
+      mods,
     );
     const dist = length(sub(move.to, move.from));
     const { min, max, pxPerMs } = this.tuning.anim;

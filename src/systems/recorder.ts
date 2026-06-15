@@ -3,7 +3,15 @@
 // — aucune position n'est stockée. Une Recording = la séquence + le contexte qui la
 // rend rejouable (seed, voiture, circuit, mode strict, version de simulation).
 
+import { ModId } from '../domain/turnmods';
 import { Vec2 } from '../domain/vec2';
+
+// Input d'un tour (PRD 13) : l'impulsion voulue ET le modificateur choisi. Le mod fait
+// partie de l'input -> le fantôme rejoue les mêmes mods (sinon il diverge en silence).
+export interface TurnInput {
+  readonly impulse: Vec2;
+  readonly mod: ModId;
+}
 
 export interface Recording {
   readonly simVersion: number; // garde-fou : rejet si la simulation a changé
@@ -13,7 +21,7 @@ export interface Recording {
   readonly strict: boolean; // mode crash = fin au moment de l'enregistrement
   readonly dispersion: boolean; // cône d'incertitude actif à l'enregistrement (PRD 12)
   readonly timeMs: number; // temps de référence (meilleur tour en boucle, ou temps d'étape)
-  readonly impulses: readonly Vec2[]; // séquence depuis le départ
+  readonly turns: readonly TurnInput[]; // séquence d'inputs depuis le départ
 }
 
 export interface RecordingMeta {
@@ -27,22 +35,22 @@ export interface RecordingMeta {
 }
 
 export class Recorder {
-  private impulses: Vec2[] = [];
+  private turns: TurnInput[] = [];
 
-  record(impulse: Vec2): void {
-    this.impulses.push(impulse);
+  record(impulse: Vec2, mod: ModId): void {
+    this.turns.push({ impulse, mod });
   }
 
   reset(): void {
-    this.impulses = [];
+    this.turns = [];
   }
 
   get length(): number {
-    return this.impulses.length;
+    return this.turns.length;
   }
 
   // Fige la séquence courante dans une Recording (copie défensive).
   toRecording(meta: RecordingMeta): Recording {
-    return { ...meta, impulses: [...this.impulses] };
+    return { ...meta, turns: [...this.turns] };
   }
 }

@@ -8,6 +8,7 @@
 import { Car } from '../domain/car';
 import { solveImpulse } from '../domain/physics';
 import { Surface } from '../domain/surfaces';
+import { TurnMods, NEUTRAL } from '../domain/turnmods';
 import { Vec2, clampLength, length, sub } from '../domain/vec2';
 import { Viewport } from './camera';
 
@@ -18,7 +19,9 @@ export const aimToImpulse = (carPos: Vec2, point: Vec2, maxImpulse: number): Vec
 
 // Mapping pur geste -> impulsion (PRD 11). Zone morte : une cible trop proche de la
 // voiture = roue libre (impulsion nulle). Sinon, solveImpulse clampe la cible dans le
-// disque atteignable et renvoie l'impulsion qui l'atteint (passée telle quelle à step).
+// disque atteignable et renvoie l'impulsion qui l'atteint. `mods` (PRD 13) doit être le
+// MÊME que celui appliqué au commit : sinon l'impulsion vise le mauvais disque et le
+// modificateur n'a pas l'effet attendu sur le déplacement.
 export function targetToImpulse(
   pos: Vec2,
   vel: Vec2,
@@ -26,9 +29,10 @@ export function targetToImpulse(
   surf: Surface,
   car: Car,
   cancelRadius: number,
+  mods: TurnMods = NEUTRAL,
 ): Vec2 {
   if (length(sub(target, pos)) < cancelRadius) return { x: 0, y: 0 };
-  return solveImpulse(pos, vel, target, surf, car);
+  return solveImpulse(pos, vel, target, surf, car, mods);
 }
 
 // Un geste quasi immobile (déplacement < seuil) est un tap accidentel à annuler.
@@ -46,6 +50,7 @@ export interface InputCallbacks {
   onToggleAid: () => void;
   onToggleView: () => void;
   onToggleDispersion: () => void;
+  onCycleMod: () => void; // cycle le modificateur de tour (PRD 13)
 }
 
 export function bindInput(
@@ -107,6 +112,8 @@ export function bindInput(
       cb.onToggleView();
     } else if (e.key === 'd' || e.key === 'D') {
       cb.onToggleDispersion();
+    } else if (e.key === 'm' || e.key === 'M') {
+      cb.onCycleMod();
     }
   });
 }

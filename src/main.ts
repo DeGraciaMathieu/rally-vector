@@ -7,6 +7,7 @@ import { generateTrack } from './domain/trackgen';
 import { Vec2, ZERO, length } from './domain/vec2';
 import { cars } from './data/cars';
 import { GEN } from './data/genParams';
+import { MODIFIERS, modifierById } from './data/modifiers';
 import { tracks } from './data/tracks';
 import { TUNING } from './data/tuning';
 import { SIM_VERSION } from './data/version';
@@ -23,7 +24,7 @@ import {
 import { GhostFrame, buildGhost } from './systems/ghost';
 import { bindInput, targetToImpulse } from './systems/input';
 import { Recorder } from './systems/recorder';
-import { Simulation, animPos } from './systems/simulation';
+import { Simulation, animPos, resolveTurnMods } from './systems/simulation';
 import { loadRecording, saveRecording } from './systems/storage';
 
 // Seed de gameplay : injecté dans l'état (préparation P5), pas encore consommé.
@@ -49,6 +50,9 @@ let renderer = new CanvasRenderer(canvas, track, TUNING);
 let showAid = true;
 let strictCrash = true; // mode crash = fin systématique (préserve la version d'origine)
 let dispersionOn = true; // cône d'incertitude seedé sur l'impulsion (PRD 12)
+// Dernière cible visée (monde) du tour en cours : permet de re-résoudre la visée si le
+// modificateur change (le disque atteignable bouge avec le mod). Effacée à chaque tour.
+let lastTarget: Vec2 | null = null;
 
 // Contre-la-montre : enregistreur de la course en cours + fantôme du meilleur record.
 const recorder = new Recorder();
@@ -105,6 +109,7 @@ const toast = el('toast');
 const aidBtn = el('btn-aid');
 const strictBtn = el('btn-strict');
 const dispersionBtn = el('btn-dispersion');
+const modBtn = el('btn-mod');
 const carBtn = el('btn-car');
 const carStats = el('car-stats');
 const trackBtn = el('btn-track');
@@ -127,6 +132,7 @@ function updateHud(): void {
   const s = surfaceAt(track, st.car.pos.x, st.car.pos.y);
   hud.surf.textContent = s.label;
   hud.surfDot.style.background = s.dot;
+  updateModBtn();
 }
 
 function reset(): void {
@@ -135,6 +141,7 @@ function reset(): void {
   raceStartMs = null;
   lapStartMs = 0;
   stageFinished = false;
+  lastTarget = null;
   refreshGhost();
   renderer.clearEffects();
   camera = centeredCamera();
@@ -185,9 +192,17 @@ function updateCarStats(): void {
 // Prévisualisation : convertit la cible monde sous le pointeur en visée. La règle
 // (zone morte + clamp dans le disque) vit dans systems/input + domain/physics.
 function aimAt(target: Vec2): void {
+  lastTarget = target;
   const { pos, vel } = sim.state.car;
   const surf = surfaceAt(track, pos.x, pos.y);
-  sim.aim(targetToImpulse(pos, vel, target, surf, car, TUNING.aim.cancelRadius));
+  // Mods effectifs du tour : la visée doit cibler le MÊME disque que le commit (PRD 13).
+  const mods = resolveTurnMods(sim.state.mod, sim.state.boosts).mods;
+  sim.aim(targetToImpulse(pos, vel, target, surf, car, TUNING.aim.cancelRadius, mods));
+}
+
+function clearAim(): void {
+  lastTarget = null;
+  sim.aim(ZERO);
 }
 
 function commit(): void {
@@ -197,8 +212,9 @@ function commit(): void {
     raceStartMs = now;
     lapStartMs = now;
   }
-  recorder.record(sim.state.impulse); // l'impulsion validée = celle que résout le tour
+  recorder.record(sim.state.impulse, sim.state.mod); // input du tour = impulsion + mod
   sim.commit(now);
+  lastTarget = null; // nouveau tour : la cible précédente n'est plus valable
 }
 
 function toggleAid(): void {
@@ -225,6 +241,22 @@ function toggleDispersion(): void {
   if (dispersionBtn.firstChild) dispersionBtn.firstChild.textContent = `Dispersion : ${dispersionOn ? 'ON' : 'OFF'} `;
 }
 
+// Cycle le modificateur du prochain tour : Aucun -> Boost -> Frein à main (PRD 13).
+function cycleMod(): void {
+  const ids = MODIFIERS.map((m) => m.id);
+  const next = ids[(ids.indexOf(sim.state.mod) + 1) % ids.length];
+  sim.setMod(next);
+  if (lastTarget) aimAt(lastTarget); // re-vise sur le nouveau disque atteignable
+  updateModBtn();
+}
+
+function updateModBtn(): void {
+  const def = modifierById(sim.state.mod);
+  const charges = def.charges >= 0 ? ` (${sim.state.boosts})` : '';
+  modBtn.firstChild!.textContent = `Mod : ${def.label}${charges} `;
+  modBtn.setAttribute('aria-pressed', String(sim.state.mod !== 'none'));
+}
+
 const bannerTitle = el('banner-title');
 const bannerText = el('banner-text');
 function showBanner(title: string, text: string): void {
@@ -240,6 +272,7 @@ el('banner-restart').addEventListener('click', reset);
 aidBtn.addEventListener('click', toggleAid);
 strictBtn.addEventListener('click', toggleStrict);
 dispersionBtn.addEventListener('click', toggleDispersion);
+modBtn.addEventListener('click', cycleMod);
 carBtn.addEventListener('click', () => loadCar((carIndex + 1) % cars.length));
 trackBtn.addEventListener('click', () => loadTrack((trackIndex + 1) % tracks.length));
 stageBtn.addEventListener('click', newStage);
@@ -250,11 +283,12 @@ bindInput(canvas, VIEWPORT, {
   commitMinDrag: TUNING.aim.commitMinDrag,
   onAim: aimAt,
   onCommit: commit,
-  onCancel: () => sim.aim(ZERO),
+  onCancel: clearAim,
   onReset: reset,
   onToggleAid: toggleAid,
   onToggleView: toggleView,
   onToggleDispersion: toggleDispersion,
+  onCycleMod: cycleMod,
 });
 
 function frame(now: number): void {
@@ -320,7 +354,10 @@ function frame(now: number): void {
     camera = follow({ ...camera, zoom: TUNING.camera.followZoom }, target, VIEWPORT, bounds, smoothing);
   }
 
-  renderer.draw(now, sim.state, sim.anim, showAid, camera, car, ghostFrames, dispersionOn);
+  // Mods effectifs prévisualisés (boost sans charge -> coup normal) : l'aide montre
+  // ce qui s'appliquera vraiment.
+  const preview = resolveTurnMods(sim.state.mod, sim.state.boosts).mods;
+  renderer.draw(now, sim.state, sim.anim, showAid, camera, car, ghostFrames, dispersionOn, preview, sim.state.mod);
 
   if (raceStartMs !== null && sim.state.phase !== 'crashed' && !stageFinished) {
     hud.time.textContent = ((now - raceStartMs) / 1000).toFixed(1) + 's';

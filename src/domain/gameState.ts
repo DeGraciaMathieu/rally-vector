@@ -9,6 +9,7 @@ import { step } from './physics';
 import { RngState, nextRandom } from './rng';
 import { Surface } from './surfaces';
 import { TrackStart } from './track';
+import { ModId, TurnMods, NEUTRAL } from './turnmods';
 import { Vec2, ZERO, add, angle, length, scale } from './vec2';
 
 const TAU = Math.PI * 2;
@@ -25,6 +26,8 @@ export interface RaceState {
   readonly car: CarState;
   readonly phase: RacePhase;
   readonly impulse: Vec2; // visée courante (ordre du pilote)
+  readonly mod: ModId; // modificateur sélectionné pour le prochain tour (PRD 13)
+  readonly boosts: number; // charges de boost restantes (ressource de run, ≥ 0)
   readonly turns: number;
   readonly laps: number;
   readonly rng: RngState;
@@ -69,11 +72,13 @@ export interface ResolvedMove {
   readonly contact: Contact | null;
 }
 
-export function createRaceState(seed: RngState, start: TrackStart): RaceState {
+export function createRaceState(seed: RngState, start: TrackStart, boosts = 0): RaceState {
   return {
     car: { pos: start.pos, vel: ZERO, heading: start.heading },
     phase: 'idle',
     impulse: ZERO,
+    mod: 'none',
+    boosts,
     turns: 0,
     laps: 0,
     rng: seed,
@@ -82,6 +87,12 @@ export function createRaceState(seed: RngState, start: TrackStart): RaceState {
 
 export function setImpulse(state: RaceState, impulse: Vec2): RaceState {
   return { ...state, impulse };
+}
+
+// Sélectionne le modificateur du prochain tour (PRD 13). Pur ; la consommation des
+// charges et l'application au step se font au moment du tour.
+export function setMod(state: RaceState, mod: ModId): RaceState {
+  return { ...state, mod };
 }
 
 // Calcule le déplacement d'un tour : impulsion + inertie, puis collision. Le contact
@@ -96,9 +107,10 @@ export function resolveMove(
   isSolid: (x: number, y: number) => boolean,
   contactAt: (x: number, y: number) => ContactPolicy,
   strict: boolean,
+  mods: TurnMods = NEUTRAL,
 ): ResolvedMove {
   const { car: body } = state;
-  const newVel = step(body.vel, impulse, surf, car);
+  const newVel = step(body.vel, impulse, surf, car, mods);
   const target = add(body.pos, newVel);
   const hit = firstHit(body.pos.x, body.pos.y, target.x, target.y, isSolid);
   const to = hit ? { x: hit.x, y: hit.y } : target;
@@ -140,6 +152,7 @@ export function applyMove(state: RaceState, move: ResolvedMove, tuning: Tuning):
       car: { pos: move.to, vel: move.newVel, heading: move.heading },
       phase: 'idle',
       impulse: ZERO,
+      mod: 'none',
       turns: state.turns + 1,
     };
   }
@@ -157,6 +170,7 @@ export function applyMove(state: RaceState, move: ResolvedMove, tuning: Tuning):
       car: { pos: move.to, vel: ZERO, heading: value * TAU },
       phase: 'idle',
       impulse: ZERO,
+      mod: 'none',
       turns: state.turns + 1,
       rng,
     };
@@ -167,6 +181,7 @@ export function applyMove(state: RaceState, move: ResolvedMove, tuning: Tuning):
     car: { pos: move.to, vel: scale(move.newVel, tuning.contact.grazeSpeedKeep), heading: move.heading },
     phase: 'idle',
     impulse: ZERO,
+    mod: 'none',
     turns: state.turns + 1,
   };
 }
