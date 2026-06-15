@@ -45,7 +45,7 @@ describe('step : mods neutres = comportement actuel (non-régression)', () => {
   });
 
   it('roue libre neutre inchangée (v·(1-drag))', () => {
-    expect(step({ x: 10, y: 0 }, { x: 0, y: 0 }, S.ROAD, car, NEUTRAL).x).toBeCloseTo(7.8, 6);
+    expect(step({ x: 10, y: 0 }, { x: 0, y: 0 }, S.ROAD, car, NEUTRAL).x).toBeCloseTo(8.24, 6);
   });
 });
 

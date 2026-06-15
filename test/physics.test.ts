@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { reachableRadius, solveImpulse, step } from '../src/domain/physics';
+import { effectiveParams } from '../src/domain/turnmods';
 import { aimToImpulse } from '../src/systems/input';
 import { cars } from '../src/data/cars';
 import { S } from '../src/data/surfaces';
@@ -17,17 +18,17 @@ const rocket = cars.find((c) => c.id === 'rocket')!;
 describe('physics.step', () => {
   it('impulsion nulle = roue libre décroissante (v·(1-drag))', () => {
     const v = step({ x: 10, y: 0 }, { x: 0, y: 0 }, S.ROAD, balanced);
-    // ROAD drag 0.22, dragFactor 1 -> 10 * 0.78 = 7.8
-    expect(v.x).toBeCloseTo(7.8, 6);
+    // ROAD drag 0.22 × dragFactor 0.8 = 0.176 -> 10 * 0.824 = 8.24
+    expect(v.x).toBeCloseTo(8.24, 6);
     expect(v.y).toBeCloseTo(0, 6);
     expect(Math.hypot(v.x, v.y)).toBeLessThan(10); // décroît
   });
 
   it('perte de grip en braquage à grande vitesse : la poussée mord moins', () => {
     const v = step({ x: 150, y: 0 }, { x: -26, y: 0 }, S.ROAD, balanced);
-    // speedFac = 150/200 = 0.75 ; grip = 0.92 * (1 - 0.45*1*0.75) = 0.6095 ; vx = (150 - 26*0.6095)*0.78
-    expect(v.x).toBeCloseTo(104.63934, 4);
-    const noLoss = (150 - 26 * 0.92) * 0.78;
+    // speedFac = min(150/130,1) = 1 ; grip = 0.92 * (1 - 0.45) = 0.506 ; vx = (150 - 26*0.506)*0.824
+    expect(v.x).toBeCloseTo(112.759456, 4);
+    const noLoss = (150 - 26 * 0.92) * 0.824;
     expect(v.x).toBeGreaterThan(noLoss);
   });
 
@@ -42,14 +43,11 @@ describe('physics.step', () => {
     );
   });
 
-  it('le grip varie selon la voiture (gripFactor par-dessus la surface)', () => {
-    // même poussée sur gravier : la voiture qui accroche le mieux avance le plus
-    const imp = { x: 20, y: 0 };
-    const vn = step({ x: 0, y: 0 }, imp, S.GRAVEL, nimble).x;
-    const vb = step({ x: 0, y: 0 }, imp, S.GRAVEL, balanced).x;
-    const vr = step({ x: 0, y: 0 }, imp, S.GRAVEL, rocket).x;
-    expect(vn).toBeGreaterThan(vb);
-    expect(vb).toBeGreaterThan(vr);
+  it('le grip effectif varie selon la voiture (gripFactor par-dessus la surface)', () => {
+    // gripFactor amplifie le grip de surface : Vive (1.2) > Équilibrée (1) > Fusée (0.8)
+    const g = (c: typeof balanced): number => effectiveParams(S.GRAVEL, c).grip;
+    expect(g(nimble)).toBeGreaterThan(g(balanced));
+    expect(g(balanced)).toBeGreaterThan(g(rocket));
   });
 });
 
@@ -71,8 +69,8 @@ const vof = (v: { x: number; y: number }): [number, number] => [v.x, v.y];
 
 describe('reachableRadius (PRD 11)', () => {
   it('= maxImpulse·grip·(1-drag)', () => {
-    // ROAD : 35 * (0.92*1) * (1 - 0.22) = 25.116
-    expect(reachableRadius(S.ROAD, balanced)).toBeCloseTo(25.116, 6);
+    // ROAD : 33 * (0.92*1) * (1 - 0.176) = 25.01664
+    expect(reachableRadius(S.ROAD, balanced)).toBeCloseTo(25.01664, 6);
   });
 
   it('croît avec le grip : gravier < route', () => {
@@ -99,7 +97,7 @@ describe('solveImpulse (PRD 11)', () => {
 
   it('round-trip en mouvement, impulsion alignée (pas d’angleGripLoss)', () => {
     const vel: Vec2 = { x: 12, y: 0 };
-    const coast: Vec2 = { x: pos.x + 12 * 0.78, y: pos.y }; // endpoint roue libre
+    const coast: Vec2 = { x: pos.x + 12 * 0.824, y: pos.y }; // endpoint roue libre (1-drag)
     const target: Vec2 = { x: coast.x + 8, y: coast.y }; // tout droit, dans le disque
     const imp = solveImpulse(pos, vel, target, S.ROAD, balanced);
     const got = endpoint(pos, vel, imp, S.ROAD, balanced);
