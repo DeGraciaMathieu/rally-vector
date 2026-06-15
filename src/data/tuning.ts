@@ -4,6 +4,7 @@ import type { Tuning } from '../domain/gameState';
 
 export const TUNING: Tuning = {
   anim: { min: 180, max: 480, pxPerMs: 0.34 }, // durée d'animation du déplacement
+  aim: { cancelRadius: 8, commitMinDrag: 6 }, // zone morte d'annulation + seuil anti-tap
   contact: {
     fatalSpeedFrac: 0.7, // au-dessus de 70% de maxSpeed, tout contact est fatal
     spinSpeedFrac: 0.25, // entre 25% et 70% : tête-à-queue ; en deçà : frôlement

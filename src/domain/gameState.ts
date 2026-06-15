@@ -34,6 +34,11 @@ export interface RaceState {
 // Car ; la géométrie du circuit dans le Track.
 export interface Tuning {
   readonly anim: { readonly min: number; readonly max: number; readonly pxPerMs: number };
+  // Geste de visée (PRD 11). En px monde.
+  readonly aim: {
+    readonly cancelRadius: number; // cible en deçà (px de la voiture) = roue libre (impulsion nulle)
+    readonly commitMinDrag: number; // déplacement pointeur min pour qu'un geste compte (anti-tap)
+  };
   // Conséquences au contact (PRD 04). Seuils en fraction de maxSpeed.
   readonly contact: {
     readonly fatalSpeedFrac: number; // au-dessus -> fatal même sur cible souple

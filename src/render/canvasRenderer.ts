@@ -6,7 +6,7 @@
 import { Car } from '../domain/car';
 import { RaceState, Tuning } from '../domain/gameState';
 import { firstHit } from '../domain/collision';
-import { step } from '../domain/physics';
+import { reachableRadius, step } from '../domain/physics';
 import { Surface } from '../domain/surfaces';
 import { Track, isSolid, surfaceAt, trackHeightPx, trackWidthPx } from '../domain/track';
 import { Vec2 } from '../domain/vec2';
@@ -320,35 +320,58 @@ export class CanvasRenderer {
     ctx.restore();
   }
 
+  // PRD 11 — geste de visée : on lit l'état (vitesse, impulsion résolue) et on dessine
+  // le vecteur vitesse, la poignée, le disque atteignable et la couleur de frein. Rien
+  // n'est décidé ni écrit ici (le mapping cible -> impulsion vit dans domain/systems).
   private drawAimAndGhost(state: RaceState, showAid: boolean, car: Car): void {
     const ctx = this.ctx;
     const pos = state.car.pos;
+    const vel = state.car.vel;
     const impulse = state.impulse;
-
-    // anneau de poussée max (propre à la voiture)
-    ctx.strokeStyle = 'rgba(255,179,0,0.18)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 4]);
-    ctx.beginPath();
-    ctx.arc(pos.x, pos.y, car.maxImpulse, 0, TAU);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // flèche d'impulsion (l'ordre du pilote)
-    if (impulse.x || impulse.y) {
-      this.arrow(pos.x, pos.y, pos.x + impulse.x, pos.y + impulse.y, this.getCss('--amber'));
-    }
-
-    if (!showAid) return;
-
+    const surf = surfaceAt(this.track, pos.x, pos.y);
     const solid = (x: number, y: number): boolean => isSolid(this.track, x, y);
 
-    // trajectoire RÉELLE prévue (poussée + inertie) sur ce tour
-    const nv = step(state.car.vel, impulse, surfaceAt(this.track, pos.x, pos.y), car);
+    // Endpoint de roue libre (centre du disque atteignable) = là où l'inertie emmène.
+    const coastV = step(vel, { x: 0, y: 0 }, surf, car);
+    const coast: Vec2 = { x: pos.x + coastV.x, y: pos.y + coastV.y };
+
+    // Disque atteignable : aide forte (palier PRD 10), masquée en mode Pro. Même
+    // masqué, le clamp s'applique côté domain ("l'aide montre, ne pilote pas").
+    if (showAid) {
+      ctx.strokeStyle = 'rgba(255,179,0,0.18)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath();
+      ctx.arc(coast.x, coast.y, reachableRadius(surf, car), 0, TAU);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Vecteur vitesse (l'inertie) : voiture -> endpoint de roue libre. Discret.
+    if (vel.x || vel.y) {
+      ctx.strokeStyle = 'rgba(74,222,128,0.4)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([2, 3]);
+      ctx.beginPath();
+      ctx.moveTo(pos.x, pos.y);
+      ctx.lineTo(coast.x, coast.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Trajectoire RÉELLE prévue (poussée + inertie) sur ce tour. Couleur de frein dès
+    // que l'impulsion demandée s'oppose à la vitesse (composante < 0) — lisibilité de
+    // base, conservée même aide masquée (retour de freinage du PRD 11).
+    const nv = step(vel, impulse, surf, car);
     const np: Vec2 = { x: pos.x + nv.x, y: pos.y + nv.y };
     const hit = firstHit(pos.x, pos.y, np.x, np.y, solid);
     const end = hit ?? np;
-    const col = hit ? this.getCss('--danger') : this.getCss('--ghost');
+    const braking = impulse.x * vel.x + impulse.y * vel.y < 0;
+    const col = hit
+      ? this.getCss('--danger')
+      : braking
+        ? this.getCss('--brake')
+        : this.getCss('--ghost');
 
     ctx.strokeStyle = col;
     ctx.lineWidth = 2;
@@ -359,11 +382,17 @@ export class CanvasRenderer {
     ctx.stroke();
     ctx.setLineDash([]);
 
+    // Poignée saisissable au bout de la trajectoire (anneau plein).
     ctx.fillStyle = col;
     ctx.beginPath();
-    ctx.arc(end.x, end.y, hit ? 5 : 4, 0, TAU);
+    ctx.arc(end.x, end.y, hit ? 5 : 6, 0, TAU);
     ctx.fill();
-    if (hit) {
+    if (!hit) {
+      ctx.fillStyle = this.getCss('--bg');
+      ctx.beginPath();
+      ctx.arc(end.x, end.y, 2.5, 0, TAU);
+      ctx.fill();
+    } else {
       ctx.strokeStyle = col;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -374,8 +403,8 @@ export class CanvasRenderer {
       ctx.stroke();
     }
 
-    // continuation en roue libre (inertie sur 2 tours) — seulement si pas de crash
-    if (!hit) {
+    // continuation en roue libre (inertie sur 2 tours) — aide seulement, si pas de crash
+    if (showAid && !hit) {
       let p: Vec2 = np;
       let v: Vec2 = nv;
       let faded = false;
@@ -409,24 +438,5 @@ export class CanvasRenderer {
     ctx.arcTo(x, y + h, x, y, r);
     ctx.arcTo(x, y, x + w, y, r);
     ctx.closePath();
-  }
-
-  private arrow(x0: number, y0: number, x1: number, y1: number, solid: string): void {
-    const ctx = this.ctx;
-    ctx.strokeStyle = solid;
-    ctx.fillStyle = solid;
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.lineTo(x1, y1);
-    ctx.stroke();
-    const a = Math.atan2(y1 - y0, x1 - x0);
-    const h = 7;
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x1 - h * Math.cos(a - 0.4), y1 - h * Math.sin(a - 0.4));
-    ctx.lineTo(x1 - h * Math.cos(a + 0.4), y1 - h * Math.sin(a + 0.4));
-    ctx.closePath();
-    ctx.fill();
   }
 }

@@ -13,6 +13,7 @@
     --ink-dim:   #7b8696;
     --amber:     #ffb300;  /* impulsion / accent co-pilote */
     --ghost:     #4ade80;  /* trajectoire prevue OK */
+    --brake:     #22d3ee;  /* trajectoire = freinage (impulsion contre l'inertie) */
     --danger:    #ff4d4d;  /* trajectoire = mur */
   }
   * { box-sizing: border-box; }
@@ -163,10 +164,13 @@
   <div class="car-stats" id="car-stats"></div>
 
   <p class="hint">
-    Tire une flèche depuis la voiture (souris ou doigt) pour donner une <b style="color:var(--amber)">impulsion</b> :
-    sa longueur = la poussée, sa direction = là où tu veux aller. La flèche n'est pas le déplacement —
-    l'<b style="color:var(--ghost)">inertie</b> se combine à ta poussée. La trajectoire verte montre où tu finiras
-    vraiment ; si elle vire au rouge, tu pars dans le mur. Puis <b>Valider</b>.
+    Attrape la <b style="color:var(--ghost)">poignée</b> au bout du vecteur vitesse (souris ou doigt) et
+    tire-la là où tu veux finir : tu <b style="color:var(--amber)">plies</b> la trajectoire contre
+    l'<b style="color:var(--ghost)">inertie</b>. Le <b style="color:var(--amber)">disque</b> montre jusqu'où le grip
+    te laisse plier (petit sur gravier, large sur route). Tirer vers la voiture freine
+    (<b style="color:var(--brake)">cyan</b>) ; si la trajectoire vire au <b style="color:var(--danger)">rouge</b>,
+    tu pars dans le mur. <b>Lâche</b> pour valider — relâcher sur la voiture = roue libre.
+    <kbd>Espace</kbd> valide aussi, <kbd>Échap</kbd> annule.
     <kbd>C</kbd> bascule la <b>vue circuit</b> (dézoom complet) pour reconnaître la spéciale.
   </p>
 

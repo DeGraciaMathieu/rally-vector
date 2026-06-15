@@ -40,6 +40,17 @@ export function segmentsIntersect(p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2): boole
   return false;
 }
 
+// Clampe un point dans le disque (centre, rayon). Sert à la zone atteignable du
+// PRD 11 : la cible de visée ne peut sortir de ce que le grip permet de plier.
+export function clampToDisk(p: Vec2, center: Vec2, radius: number): Vec2 {
+  const dx = p.x - center.x;
+  const dy = p.y - center.y;
+  const d = Math.hypot(dx, dy);
+  if (d <= radius || d === 0) return p;
+  const k = radius / d;
+  return { x: center.x + dx * k, y: center.y + dy * k };
+}
+
 // Côté signé d'un point par rapport au segment orienté a->b (>0 : à gauche).
 export const sideOf = (gate: Segment, p: Vec2): number => cross3(gate.a, gate.b, p);
 

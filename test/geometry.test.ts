@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Segment, crossesForward, segmentsIntersect, sideOf } from '../src/domain/geometry';
+import { Segment, clampToDisk, crossesForward, segmentsIntersect, sideOf } from '../src/domain/geometry';
 
 const v = (x: number, y: number) => ({ x, y });
 
@@ -45,5 +45,24 @@ describe('geometry.crossesForward', () => {
 
   it('ignore un déplacement qui ne croise pas la porte', () => {
     expect(crossesForward(gate, v(0, 5), v(4, 5))).toBe(false);
+  });
+});
+
+describe('geometry.clampToDisk (PRD 11)', () => {
+  const center = v(10, 10);
+
+  it('point déjà dans le disque : inchangé', () => {
+    expect(clampToDisk(v(13, 10), center, 5)).toEqual(v(13, 10));
+  });
+
+  it('point hors disque : projeté sur le bord (à distance = rayon du centre)', () => {
+    const p = clampToDisk(v(30, 10), center, 5); // sur l'axe x
+    expect(p.x).toBeCloseTo(15, 6);
+    expect(p.y).toBeCloseTo(10, 6);
+    expect(Math.hypot(p.x - center.x, p.y - center.y)).toBeCloseTo(5, 6);
+  });
+
+  it('centre exact (distance nulle) : renvoyé tel quel sans division par zéro', () => {
+    expect(clampToDisk(center, center, 5)).toEqual(center);
   });
 });

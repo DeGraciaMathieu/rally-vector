@@ -4,7 +4,7 @@
 
 import { Track, surfaceAt, trackHeightPx, trackWidthPx } from './domain/track';
 import { generateTrack } from './domain/trackgen';
-import { length } from './domain/vec2';
+import { Vec2, ZERO, length } from './domain/vec2';
 import { cars } from './data/cars';
 import { GEN } from './data/genParams';
 import { tracks } from './data/tracks';
@@ -21,7 +21,7 @@ import {
   screenToWorld,
 } from './systems/camera';
 import { GhostFrame, buildGhost } from './systems/ghost';
-import { bindInput } from './systems/input';
+import { bindInput, targetToImpulse } from './systems/input';
 import { Recorder } from './systems/recorder';
 import { Simulation, animPos } from './systems/simulation';
 import { loadRecording, saveRecording } from './systems/storage';
@@ -180,6 +180,14 @@ function updateCarStats(): void {
     `<span><span class="k">glisse</span> <b>${car.angleGripLoss.toFixed(2)}</b></span>`;
 }
 
+// Prévisualisation : convertit la cible monde sous le pointeur en visée. La règle
+// (zone morte + clamp dans le disque) vit dans systems/input + domain/physics.
+function aimAt(target: Vec2): void {
+  const { pos, vel } = sim.state.car;
+  const surf = surfaceAt(track, pos.x, pos.y);
+  sim.aim(targetToImpulse(pos, vel, target, surf, car, TUNING.aim.cancelRadius));
+}
+
 function commit(): void {
   if (sim.state.phase !== 'idle' || stageFinished) return;
   const now = performance.now();
@@ -227,12 +235,12 @@ trackBtn.addEventListener('click', () => loadTrack((trackIndex + 1) % tracks.len
 stageBtn.addEventListener('click', newStage);
 
 bindInput(canvas, VIEWPORT, {
-  getCarPos: () => sim.state.car.pos,
-  getMaxImpulse: () => car.maxImpulse,
   canAim: () => sim.state.phase === 'idle',
   screenToWorld: (screen) => screenToWorld(camera, VIEWPORT, screen),
-  onAim: (impulse) => sim.aim(impulse),
+  commitMinDrag: TUNING.aim.commitMinDrag,
+  onAim: aimAt,
   onCommit: commit,
+  onCancel: () => sim.aim(ZERO),
   onReset: reset,
   onToggleAid: toggleAid,
   onToggleView: toggleView,
