@@ -15,11 +15,18 @@ npm run test:run   # vitest une passe (CI)
 
 ## Philosophie
 
+- **Tester le comportement, pas l'implémentation.** On vérifie *ce que fait* le
+  système (entrées → sorties observables), jamais *comment* il le fait. Un
+  refactor interne qui préserve le comportement ne doit casser aucun test.
+- **Macro, pas micro.** Viser le comportement fonctionnel à travers les fonctions
+  exportées, comme un consommateur du module. On ne teste pas une fonction privée,
+  une structure de données interne, un compteur d'appels ou l'ordre des étapes —
+  ce sont des détails d'implémentation. Si une chose n'est observable qu'en
+  inspectant les entrailles du module, c'est qu'elle n'a pas à être testée
+  directement.
 - On teste `domain/`, `data/` et `systems/` **sans rendu**.
 - `render/` n'est **pas** testé unitairement : il est couvert par le critère de
   non-régression (état inchangé, effets on/off — voir `test/regression.test.ts`).
-- Tests de comportement : utiliser les fonctions exportées comme un consommateur du
-  module, pas les détails internes.
 
 ## Test de déterminisme — SYSTÉMATIQUE
 
