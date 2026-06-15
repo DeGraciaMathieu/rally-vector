@@ -14,6 +14,7 @@ import { Track, isSolid, surfaceAt, trackHeightPx, trackWidthPx } from '../domai
 import { Vec2 } from '../domain/vec2';
 import { AnimView, animEase, animPos } from '../systems/simulation';
 import { Camera } from '../systems/camera';
+import { cancelZoneRect } from '../systems/input';
 import { GhostFrame } from '../systems/ghost';
 import { Effects } from './effects';
 
@@ -200,6 +201,7 @@ export class CanvasRenderer {
     dispersionOn: boolean,
     mods: TurnMods,
     modId: ModId,
+    aimDrag: { active: boolean; overCancel: boolean },
   ): void {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.vw, this.vh);
@@ -245,6 +247,32 @@ export class CanvasRenderer {
 
     this.fx.drawParticles(ctx, now); // poussière/gravier/gerbe au-dessus
 
+    ctx.restore();
+
+    // Overlay fixé à l'écran (hors caméra) : zone d'annulation pendant le drag.
+    if (aimDrag.active && state.phase === 'idle') this.drawCancelZone(aimDrag.overCancel);
+  }
+
+  // Zone « ✕ Annuler » (PRD 11) : relâcher dessus annule la visée sans consommer le
+  // tour. Surbrillance quand le pointeur la survole. Cosmétique (la détection vit dans
+  // systems/input, même géométrie via cancelZoneRect).
+  private drawCancelZone(hot: boolean): void {
+    const ctx = this.ctx;
+    const z = cancelZoneRect({ width: this.vw, height: this.vh });
+    ctx.save();
+    ctx.globalAlpha = hot ? 0.95 : 0.6;
+    ctx.fillStyle = hot ? this.getCss('--danger') : 'rgba(11,14,20,0.85)';
+    this.roundRect(z.x, z.y, z.w, z.h, 8);
+    ctx.fill();
+    ctx.strokeStyle = this.getCss('--danger');
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = hot ? this.getCss('--bg') : this.getCss('--danger');
+    ctx.font = '600 14px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('✕ Annuler', z.x + z.w / 2, z.y + z.h / 2 + 1);
     ctx.restore();
   }
 

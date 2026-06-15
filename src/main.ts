@@ -53,6 +53,8 @@ let dispersionOn = true; // cône d'incertitude seedé sur l'impulsion (PRD 12)
 // Dernière cible visée (monde) du tour en cours : permet de re-résoudre la visée si le
 // modificateur change (le disque atteignable bouge avec le mod). Effacée à chaque tour.
 let lastTarget: Vec2 | null = null;
+// État du drag de visée (affichage de la zone d'annulation, cosmétique).
+let aimDrag = { active: false, overCancel: false };
 
 // Contre-la-montre : enregistreur de la course en cours + fantôme du meilleur record.
 const recorder = new Recorder();
@@ -282,6 +284,9 @@ bindInput(canvas, VIEWPORT, {
   screenToWorld: (screen) => screenToWorld(camera, VIEWPORT, screen),
   commitMinDrag: TUNING.aim.commitMinDrag,
   onAim: aimAt,
+  onDrag: (active, overCancel) => {
+    aimDrag = { active, overCancel };
+  },
   onCommit: commit,
   onCancel: clearAim,
   onReset: reset,
@@ -357,7 +362,7 @@ function frame(now: number): void {
   // Mods effectifs prévisualisés (boost sans charge -> coup normal) : l'aide montre
   // ce qui s'appliquera vraiment.
   const preview = resolveTurnMods(sim.state.mod, sim.state.boosts).mods;
-  renderer.draw(now, sim.state, sim.anim, showAid, camera, car, ghostFrames, dispersionOn, preview, sim.state.mod);
+  renderer.draw(now, sim.state, sim.anim, showAid, camera, car, ghostFrames, dispersionOn, preview, sim.state.mod, aimDrag);
 
   if (raceStartMs !== null && sim.state.phase !== 'crashed' && !stageFinished) {
     hud.time.textContent = ((now - raceStartMs) / 1000).toFixed(1) + 's';

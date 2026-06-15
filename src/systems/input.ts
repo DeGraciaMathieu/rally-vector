@@ -39,11 +39,31 @@ export function targetToImpulse(
 export const isCancelGesture = (down: Vec2, up: Vec2, minDrag: number): boolean =>
   length(sub(up, down)) < minDrag;
 
+// Zone « ✕ Annuler » affichée pendant le drag (PRD 11). Coordonnées VIEWPORT (px
+// logiques, fixées à l'écran, hors caméra) : relâcher dessus = annulation. Partagée
+// avec render/ pour que l'affichage et la détection coïncident.
+export interface CancelZone {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+}
+
+export function cancelZoneRect(vp: Viewport): CancelZone {
+  const w = 150;
+  const h = 34;
+  return { x: vp.width / 2 - w / 2, y: 12, w, h };
+}
+
+export const inCancelZone = (screen: Vec2, z: CancelZone): boolean =>
+  screen.x >= z.x && screen.x <= z.x + z.w && screen.y >= z.y && screen.y <= z.y + z.h;
+
 export interface InputCallbacks {
   canAim: () => boolean; // vrai seulement à l'arrêt (phase idle)
   screenToWorld: (screen: Vec2) => Vec2; // mappe le point écran (viewport) en monde
   commitMinDrag: number; // déplacement pointeur min (px monde) pour qu'un geste compte
   onAim: (target: Vec2) => void; // prévisualisation : cible monde sous le pointeur
+  onDrag: (active: boolean, overCancel: boolean) => void; // état du drag (affichage zone)
   onCommit: () => void; // release valide : anime le tour
   onCancel: () => void; // geste annulé : ne consomme pas le tour, remet la visée à zéro
   onReset: () => void;
@@ -58,15 +78,17 @@ export function bindInput(
   viewport: Viewport,
   cb: InputCallbacks,
 ): void {
-  // Point client -> coordonnées viewport (px logiques) -> monde (via caméra).
-  const toWorld = (ev: PointerEvent): Vec2 => {
+  const zone = cancelZoneRect(viewport);
+  // Point client -> coordonnées VIEWPORT (px logiques).
+  const toScreen = (ev: PointerEvent): Vec2 => {
     const r = canvas.getBoundingClientRect();
-    const screen = {
+    return {
       x: ((ev.clientX - r.left) / r.width) * viewport.width,
       y: ((ev.clientY - r.top) / r.height) * viewport.height,
     };
-    return cb.screenToWorld(screen);
   };
+  // ... puis -> monde (via caméra).
+  const toWorld = (ev: PointerEvent): Vec2 => cb.screenToWorld(toScreen(ev));
 
   let grabbing = false;
   let downAt: Vec2 | null = null; // point de saisie (pour le seuil anti-tap)
@@ -76,14 +98,24 @@ export function bindInput(
     grabbing = true;
     canvas.setPointerCapture(e.pointerId);
     downAt = toWorld(e);
+    cb.onDrag(true, false);
     cb.onAim(downAt);
   });
   canvas.addEventListener('pointermove', (e) => {
-    if (grabbing) cb.onAim(toWorld(e));
+    if (!grabbing) return;
+    cb.onDrag(true, inCancelZone(toScreen(e), zone));
+    cb.onAim(toWorld(e));
   });
   canvas.addEventListener('pointerup', (e) => {
     if (!grabbing) return;
     grabbing = false;
+    cb.onDrag(false, false);
+    // Relâcher sur la zone « ✕ Annuler » = annulation explicite (ne consomme pas le tour).
+    if (inCancelZone(toScreen(e), zone)) {
+      cb.onCancel();
+      downAt = null;
+      return;
+    }
     const up = toWorld(e);
     // Tap quasi immobile = geste accidentel : on annule (anti-commit au doigt).
     if (downAt && isCancelGesture(downAt, up, cb.commitMinDrag)) cb.onCancel();
@@ -95,6 +127,7 @@ export function bindInput(
     if (!grabbing) return;
     grabbing = false;
     downAt = null;
+    cb.onDrag(false, false);
     cb.onCancel();
   });
 
