@@ -5,6 +5,7 @@
 import { Track, surfaceAt, trackHeightPx, trackWidthPx } from './domain/track';
 import { generateTrack } from './domain/trackgen';
 import { Vec2, ZERO, length } from './domain/vec2';
+import { BOT_PROFILES, PELOTON_SIZE, START_GRID } from './data/bots';
 import { cars } from './data/cars';
 import { GEN } from './data/genParams';
 import { MODIFIERS, modifierById } from './data/modifiers';
@@ -23,8 +24,9 @@ import {
 } from './systems/camera';
 import { GhostFrame, buildGhost } from './systems/ghost';
 import { bindInput, targetToImpulse } from './systems/input';
+import { Peloton, PlayerProgress } from './systems/race';
 import { Recorder } from './systems/recorder';
-import { Simulation, animPos, resolveTurnMods } from './systems/simulation';
+import { Simulation, animEase, animPos, resolveTurnMods } from './systems/simulation';
 import { loadRecording, saveRecording } from './systems/storage';
 
 // Seed de gameplay : injecté dans l'état (préparation P5), pas encore consommé.
@@ -63,6 +65,16 @@ let ghostFrames: GhostFrame[] | null = null;
 // Étape (stage) : l'arrivée franchie une fois termine la spéciale.
 let stageFinished = false;
 let finishMs = 0;
+
+// Peloton de bots (PRD 16) : adversaires IA qui courent en simultané. Avancent d'un
+// tour à chaque commit du joueur. Suivi de la progression du joueur pour le classement.
+let peloton!: Peloton;
+let playerNextCp = 0;
+let playerFinishTurn: number | null = null;
+let pelotonSettled = false;
+function makePeloton(): Peloton {
+  return new Peloton(track, TUNING, car, SEED, BOT_PROFILES.slice(0, PELOTON_SIZE), START_GRID, strictCrash);
+}
 
 // Caméra cosmétique (jamais dans l'état). Bornes dérivées de la taille du circuit.
 let bounds: Bounds = makeBounds();
@@ -140,6 +152,10 @@ function updateHud(): void {
 function reset(): void {
   sim.reset(SEED);
   recorder.reset();
+  peloton = makePeloton();
+  playerNextCp = 0;
+  playerFinishTurn = null;
+  pelotonSettled = false;
   raceStartMs = null;
   lapStartMs = 0;
   stageFinished = false;
@@ -216,6 +232,7 @@ function commit(): void {
   }
   recorder.record(sim.state.impulse, sim.state.mod); // input du tour = impulsion + mod
   sim.commit(now);
+  peloton.advance(); // course simultanée : les bots jouent leur tour du même round
   lastTarget = null; // nouveau tour : la cible précédente n'est plus valable
 }
 
@@ -319,27 +336,51 @@ function frame(now: number): void {
   };
 
   for (const ev of events) {
-    if (ev.type !== 'lapComplete') continue;
+    if (ev.type === 'checkpoint') {
+      playerNextCp++; // progression du joueur (pour le classement du peloton)
+      continue;
+    }
     if (track.kind === 'stage') {
       // Arrivée franchie : l'étape est terminée (une seule fois).
       if (!stageFinished) {
         stageFinished = true;
+        playerFinishTurn = sim.state.turns;
         finishMs = now - (raceStartMs ?? now);
         saveRecord(finishMs);
       }
     } else {
+      playerNextCp = 0;
       const lapMs = now - lapStartMs;
       lapStartMs = now;
       saveRecord(lapMs);
     }
   }
 
+  // Course du joueur terminée (arrivée ou crash) : on fait jouer le peloton jusqu'au
+  // bout pour figer le classement final (bots déterministes -> résultat calculable).
+  if (!pelotonSettled && (stageFinished || sim.state.phase === 'crashed')) {
+    peloton.runToEnd();
+    pelotonSettled = true;
+  }
+  const playerProgress: PlayerProgress = {
+    pos: sim.state.car.pos,
+    nextCp: playerNextCp,
+    finished: stageFinished,
+    finishTurn: playerFinishTurn,
+    crashed: sim.state.phase === 'crashed',
+  };
+  const standings = peloton.standings(playerProgress);
+  const playerRank = standings.findIndex((s) => s.isPlayer) + 1;
+  // Interpolation des bots : même avancement de tour que l'animation du joueur.
+  const prog = sim.state.phase === 'animating' && sim.anim ? animEase(sim.anim, now) : 1;
+  const botViews = peloton.views(prog);
+
   // Le tour vient de se terminer : rafraîchir le HUD (et le bandeau si crash/arrivée).
   if (before === 'animating' && sim.state.phase !== 'animating') {
     if (sim.state.phase === 'crashed') {
-      showBanner('Sortie de route', 'La voiture a tapé. En rallye, on ne pardonne pas — la course est terminée.');
+      showBanner('Sortie de route', `La voiture a tapé — course terminée. Vous finissez P${playerRank}/${standings.length}.`);
     } else if (stageFinished) {
-      showBanner('Spéciale terminée', `Temps : ${(finishMs / 1000).toFixed(1)}s`);
+      showBanner('Spéciale terminée', `Temps : ${(finishMs / 1000).toFixed(1)}s — P${playerRank}/${standings.length}`);
     } else if (contact === 'spin') {
       showToast('Tête-à-queue !');
     } else if (contact === 'graze') {
@@ -362,7 +403,7 @@ function frame(now: number): void {
   // Mods effectifs prévisualisés (boost sans charge -> coup normal) : l'aide montre
   // ce qui s'appliquera vraiment.
   const preview = resolveTurnMods(sim.state.mod, sim.state.boosts).mods;
-  renderer.draw(now, sim.state, sim.anim, showAid, camera, car, ghostFrames, dispersionOn, preview, sim.state.mod, aimDrag);
+  renderer.draw(now, sim.state, sim.anim, showAid, camera, car, ghostFrames, dispersionOn, preview, sim.state.mod, aimDrag, botViews, standings);
 
   if (raceStartMs !== null && sim.state.phase !== 'crashed' && !stageFinished) {
     hud.time.textContent = ((now - raceStartMs) / 1000).toFixed(1) + 's';

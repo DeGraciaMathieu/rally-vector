@@ -16,6 +16,7 @@ import { AnimView, animEase, animPos } from '../systems/simulation';
 import { Camera } from '../systems/camera';
 import { cancelZoneRect } from '../systems/input';
 import { GhostFrame } from '../systems/ghost';
+import { BotView, Standing } from '../systems/race';
 import { Effects } from './effects';
 
 const TAU = Math.PI * 2;
@@ -202,6 +203,8 @@ export class CanvasRenderer {
     mods: TurnMods,
     modId: ModId,
     aimDrag: { active: boolean; overCancel: boolean },
+    bots: readonly BotView[] = [],
+    standings: readonly Standing[] | null = null,
   ): void {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.vw, this.vh);
@@ -230,6 +233,15 @@ export class CanvasRenderer {
       this.drawGhost(ghost, state.turns, progress, car.livery);
     }
 
+    // Voitures adverses (peloton, PRD 16) sous la voiture du joueur : interpolées par
+    // le même avancement de tour. Atténuées si arrivées/crashées. render/ ne décide rien.
+    for (const b of bots) {
+      ctx.save();
+      ctx.globalAlpha = b.done ? 0.4 : 1;
+      this.drawCar(b.pos.x, b.pos.y, b.heading, b.livery);
+      ctx.restore();
+    }
+
     if (state.phase === 'animating' && anim) {
       const p = animPos(anim, now);
       // Dépose traces + particules le long du déplacement réel (depuis flags AnimView).
@@ -251,6 +263,33 @@ export class CanvasRenderer {
 
     // Overlay fixé à l'écran (hors caméra) : zone d'annulation pendant le drag.
     if (aimDrag.active && state.phase === 'idle') this.drawCancelZone(aimDrag.overCancel);
+
+    // Classement du peloton (PRD 16), coin haut-droit. Données calculées en systems/.
+    if (standings && standings.length) this.drawStandings(standings);
+  }
+
+  // Tableau de classement (joueur surligné). Cosmétique : ne fait qu'afficher l'ordre
+  // fourni par systems/race (render/ ne décide rien).
+  private drawStandings(rows: readonly Standing[]): void {
+    const ctx = this.ctx;
+    const lh = 16;
+    const w = 104;
+    const x = this.vw - w - 10;
+    const y0 = 10;
+    ctx.save();
+    ctx.globalAlpha = 0.82;
+    ctx.fillStyle = 'rgba(11,14,20,0.72)';
+    this.roundRect(x, y0, w, rows.length * lh + 10, 6);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.font = '600 12px system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    rows.forEach((r, i) => {
+      ctx.fillStyle = r.isPlayer ? '#ffd166' : '#cdd3dc';
+      ctx.fillText(`${i + 1}. ${r.label}${r.finished ? ' ✓' : ''}`, x + 8, y0 + 5 + i * lh + lh / 2);
+    });
+    ctx.restore();
   }
 
   // Zone « ✕ Annuler » (PRD 11) : relâcher dessus annule la visée sans consommer le
