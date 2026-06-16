@@ -63,5 +63,6 @@ npm run typecheck  # tsc --noEmit
 - `surfaces` — sols (grip/drag/contact), obstacles, franchissement
 - `cars` — caractéristiques voiture, physique impulsion×inertie, modificateurs de tour
 - `simulation` — boucle de tour, phases, RNG seedé, dispersion, conséquences de contact, fantôme
+- `bots` — IA adverse, peloton, course simultanée, navigation, RNG par voiture
 - `testing` — déterminisme, fichiers de test, où placer un test
 - `prd` — workflow complet pour implémenter un PRD ou une feature

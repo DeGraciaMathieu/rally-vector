@@ -34,10 +34,10 @@ La règle de direction d'import est vérifiée par `npm run lint`.
 ```
 src/
   domain/   vec2, surfaces (types), car, track, physics, collision, geometry,
-            dispersion, obstacles, rng, gameState, turnmods, trackgen
+            dispersion, obstacles, rng, gameState, turnmods, trackgen, ai
   data/     tuning, surfaces (table), cars, modifiers, obstacles, effects,
-            genParams, version, tracks/
-  systems/  simulation, input, lap, camera, recorder, ghost, storage
+            genParams, version, tracks/, bots
+  systems/  simulation, input, lap, camera, recorder, ghost, storage, race
   render/   canvasRenderer, effects
   main.ts   composition root (câble systems + render)
 ```
@@ -62,6 +62,7 @@ L'animation entre deux tours appartient à `render/` et **n'influence jamais l'�
 - **Détection de contact / géométrie** → `domain/collision.ts`, `domain/geometry.ts`
 - **Hasard de gameplay** → toujours via le RNG seedé de `domain/rng.ts` porté dans `RaceState`
 - **Orchestration d'un tour, tours/laps** → `systems/simulation.ts`, `systems/lap.ts`
+- **Pilote/IA d'un bot** → `domain/ai.ts` (décision pure) ; profils + réglages dans `data/bots.ts` ; peloton (course simultanée) dans `systems/race.ts` (voir skill `bots`)
 - **Caméra, fantôme, persistance, input** → `systems/`
 - **Dessin, effets visuels, easing** → `render/`
 
