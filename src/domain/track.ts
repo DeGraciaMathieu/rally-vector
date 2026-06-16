@@ -38,6 +38,10 @@ export interface Track {
   readonly start: TrackStart;
   readonly finishLine: Segment; // orienté selon le sens de course
   readonly checkpoints: readonly Segment[]; // ORDONNÉS, orientés sens de course
+  // Ligne de course (centres des waypoints, départ -> arrivée), si connue du
+  // générateur. Sert à la navigation des bots (PRD 16) ; absente des circuits faits
+  // main. Purement indicative : ne change ni la collision ni le comptage de tours.
+  readonly path?: readonly Vec2[];
 }
 
 export const trackWidthPx = (t: Track): number => t.width * t.tileSize;

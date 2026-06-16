@@ -237,6 +237,10 @@ export function generateTrack(seed: number, cfg: GenConfig): Track {
   const finishLine = gate(center(finish.x, finish.y), finishDir);
   const start = { pos: center(corners[0].x, corners[0].y), heading: 0 };
 
+  // Ligne de course pour la navigation des bots (PRD 16) : centres des coins du
+  // serpentin, départ -> arrivée. Indicative (ne touche ni collision ni laps).
+  const path = corners.map((c) => center(c.x, c.y));
+
   const track: Track = {
     id: `stage-${seed}`,
     name: `Spéciale #${seed}`,
@@ -251,6 +255,7 @@ export function generateTrack(seed: number, cfg: GenConfig): Track {
     start,
     finishLine,
     checkpoints,
+    path,
   };
 
   if (isTerminable(track)) return track;
